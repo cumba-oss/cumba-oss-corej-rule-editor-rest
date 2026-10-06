@@ -34,9 +34,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * An API-only build (no {@code classpath:/static/index.html}) registers no mapping and validates
  * nothing: one INFO line.
  * </p>
+ *
+ * <p>
+ * {@code final} and {@code proxyBeanMethods = false} (no {@code @Bean} methods, so no CGLIB
+ * subclass is needed): the constructor throws on an unknown brand, and SpotBugs'
+ * CT_CONSTRUCTOR_THROW wants a class that throws from its constructor to be unsubclassable.
+ * </p>
  */
-@Configuration
-public class BrandResourceConfig implements WebMvcConfigurer
+@Configuration(proxyBeanMethods = false)
+public final class BrandResourceConfig implements WebMvcConfigurer
 {
 
     /** The name rule every brand server checks before the name touches a path. */
