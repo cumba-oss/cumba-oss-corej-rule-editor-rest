@@ -43,9 +43,17 @@ public class EditorProperties
 
     private List<String> trustedProxies = List.of();
 
+    private final Brand brand = new Brand();
+
     public Repository getRepository()
     {
         return repository;
+    }
+
+
+    public Brand getBrand()
+    {
+        return brand;
     }
 
 
@@ -731,6 +739,51 @@ public class EditorProperties
         public void setPreLoginSessionTimeout(Duration aPreLoginSessionTimeout)
         {
             preLoginSessionTimeout = aPreLoginSessionTimeout;
+        }
+    }
+
+
+    /**
+     * {@code editor.brand.*}: the look of the bundled SPA (PLAN-web-branding-and-theme §5.5). The
+     * brand is a named folder — {@code brand.css} and an optional {@code brand.json} — looked up
+     * under {@link #getDirectory() directory} first, then among the brands packaged with the SPA.
+     * Read by {@link BrandResourceConfig}; inert in an API-only build.
+     */
+    public static class Brand
+    {
+
+        /**
+         * The brand's name; {@code EDITOR_BRAND_NAME} ({@code EDITOR_BRAND} maps to this object and
+         * refuses to start).
+         */
+        private String name = "neutral";
+
+        /**
+         * Where extra brands live ({@code <directory>/<name>/brand.css}); blank = packaged only.
+         */
+        private @Nullable String directory;
+
+        public String getName()
+        {
+            return name;
+        }
+
+
+        public void setName(String aName)
+        {
+            name = aName;
+        }
+
+
+        public @Nullable String getDirectory()
+        {
+            return directory;
+        }
+
+
+        public void setDirectory(@Nullable String aDirectory)
+        {
+            directory = aDirectory;
         }
     }
 }

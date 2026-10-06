@@ -54,6 +54,9 @@ class DeploymentDefaultsTest
         assertFalse(compose.contains("\"${WEB_PORT:-8080}:80\""), "never every interface");
         assertTrue(compose.contains("SERVER_SERVLET_SESSION_COOKIE_SECURE: ${COOKIE_SECURE:-true}"),
                 "the trial opt-out is explicit and off by default");
+        // PLAN-web-branding-and-theme: the SPA's brand is selectable, neutral by default (R5)
+        assertTrue(compose.contains("BRAND: ${BRAND:-neutral}"),
+                "rule-editor-web takes BRAND, defaulting to neutral");
     }
 
 

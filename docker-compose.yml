@@ -89,6 +89,12 @@ services:
       context: ../cumba-oss-corej-rule-editor-web
     depends_on:
       - rule-editor-rest
+    environment:
+      # The look (PLAN-web-branding-and-theme): the brand folder nginx serves as /brand/ —
+      # neutral by default, p300 ships too; a brand of your own is mounted at
+      # /usr/share/nginx/html/brands/<name> (the web repo's DOCKER.md). An unknown name stops
+      # the container at start-up, naming the available ones.
+      BRAND: ${BRAND:-neutral}
     ports:
       # the loopback only: plain HTTP never leaves this machine (see the HTTPS note above)
       - "127.0.0.1:${WEB_PORT:-8080}:80"

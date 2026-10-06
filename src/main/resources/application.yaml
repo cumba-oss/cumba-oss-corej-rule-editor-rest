@@ -105,6 +105,18 @@ editor:
   # another format is refused by the engine and the instance runs without one (analysis still
   # works, scope completion is empty, a scenario needing the store fails with the reason).
   metadata-store:
+  # ---- the brand of the bundled SPA (-Pbundle-web; PLAN-web-branding-and-theme) -------------
+  # A brand is a named folder (brand.css with the design tokens for light and dark, an optional
+  # brand.json for a logo) served as /brand/. `neutral` (the default look) and `p300` ship with
+  # the SPA; a brand of your own goes to <directory>/<name>/ — the launcher's .conf points
+  # directory at the bundle's config/brands (EDITOR_BRAND_DIRECTORY overrides it). An unknown
+  # or invalid name FAILS START-UP naming the available brands; nothing is served silently.
+  # ⚠ The environment variable is EDITOR_BRAND_NAME — EDITOR_BRAND maps to the `brand` object
+  # itself, which no string binds to: the service refuses to start. API-only builds (no bundled
+  # SPA) ignore both keys.
+  brand:
+    name: neutral
+    directory:
   run:
     # Every run is a child JVM (§5.8.5, review H5): a hard heap cap, killed past the wall-clock
     # timeout; max-concurrent workers at once, max-queued waiting up to queue-wait, beyond that

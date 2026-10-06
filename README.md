@@ -277,13 +277,21 @@ own. No corpus directory is shipped: the rules come from git, per user.
 1. **Bundled** — the SPA inside this jar, served at `/` on the same origin:
    `mvn -Pbundle-web clean package -Dweb.dist.dir=../cumba-oss-corej-rule-editor-web/dist`
    (build the SPA first: `npm ci && npm run build` there). The default build is **API-only**.
+   The SPA's **brand** (its look: `brands/README.md` in the web repo) is served as `/brand/` by
+   `BrandResourceConfig`: `EDITOR_BRAND_NAME=<name>` selects it (`neutral` by default, `p300`
+   ships; ⚠ `EDITOR_BRAND` is not the variable — it maps to the `editor.brand` object itself and
+   the service refuses to start), looked up under `editor.brand.directory` first (`config/brands/` of the bundle, or
+   `EDITOR_BRAND_DIRECTORY`; `/etc/rule-editor/brands/<name>` in the container) and then among
+   the brands packaged with the SPA. An unknown or invalid name **fails start-up** naming the
+   available ones. API-only builds serve no `/brand/`.
 2. **Two apps behind a reverse proxy** — the SPA served as static files, `/api`, `/v3/api-docs`
    and `/swagger-ui*` forwarded here; the browser still sees one origin. The web repo's
    `docker/nginx.conf` is the reference. Sibling subdomains of one site also work: list the SPA's
    origin in `editor.cors.allowed-origins` and set `server.servlet.session.cookie.domain`.
    ⛔ Cross-site is not supported (`SameSite=Lax` cookie, session-bound CSRF token).
 3. **`docker-compose.yml`** — `rule-editor-rest` (this `Dockerfile`, built from the exploded
-   bundle; `workspaces` and `metadata-store` volumes) + `rule-editor-web` (the web repo's nginx).
+   bundle; `workspaces` and `metadata-store` volumes) + `rule-editor-web` (the web repo's nginx;
+   `BRAND=<name>` selects its brand, passed through as `${BRAND:-neutral}`).
    ⚠ Written without docker available: shape-checked, not run. The metadata store is a FILE
    seeded separately at the engine's store format (5), placed in the `metadata-store` volume as
    `metadata-store.zip` — see the compose file's header; the run workers' memory is
