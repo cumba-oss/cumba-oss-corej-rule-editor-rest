@@ -152,7 +152,8 @@ public class RuleAnalyser
             }
         }
         return new Analysis(aAssembled.coreId(), rule != null, aAssembled.parked(), diagnostics,
-                derived, scope, refs, bindingsOf(aCheck), store.available());
+                derived, scope, refs, bindingsOf(aCheck), requiredVariablesOf(aCheck),
+                store.available());
     }
 
 
@@ -195,6 +196,34 @@ public class RuleAnalyser
         }
         return new Analysis.Scope(aProducts, aUniverse.missingProducts(), datasets,
                 VariableCatalogue.build(aStore, aUniverse));
+    }
+
+
+    /** The {@code Requirements.Variables.All} then {@code .Any} entries, distinct, as authored. */
+    static List<String> requiredVariablesOf(@Nullable JsonNode aCheck)
+    {
+        List<String> out = new ArrayList<>();
+        if (aCheck == null)
+        {
+            return out;
+        }
+        JsonNode variables = aCheck.path("Requirements").path("Variables");
+        for (String facet : List.of("All", "Any"))
+        {
+            JsonNode names = variables.path(facet);
+            if (names.isArray())
+            {
+                for (JsonNode n : names)
+                {
+                    String name = n.asText("").strip();
+                    if (!name.isEmpty() && !out.contains(name))
+                    {
+                        out.add(name);
+                    }
+                }
+            }
+        }
+        return out;
     }
 
 

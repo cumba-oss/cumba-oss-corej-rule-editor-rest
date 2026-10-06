@@ -61,6 +61,12 @@
             },
             "type" : "array"
           },
+          "requiredVariables" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "scope" : {
             "$ref" : "#/components/schemas/Scope"
           },

@@ -26,12 +26,15 @@ import org.jspecify.annotations.Nullable;
  *            every variable the rule names
  * @param bindings
  *            the {@code $binding} names the buffer declares
+ * @param requiredVariables
+ *            the variables the buffer's {@code Requirements.Variables} names ({@code All} then
+ *            {@code Any}, as authored) — a new scenario's columns beside the referenced ones
  * @param storeAvailable
  *            whether the scope universe was computed against a store
  */
 public record Analysis(String coreId, boolean loaded, boolean parked, List<Diagnostic> diagnostics,
         @Nullable Derived derived, Scope scope, List<VariableRef> referencedVariables,
-        List<String> bindings, boolean storeAvailable)
+        List<String> bindings, List<String> requiredVariables, boolean storeAvailable)
 {
 
     public Analysis
@@ -39,6 +42,7 @@ public record Analysis(String coreId, boolean loaded, boolean parked, List<Diagn
         diagnostics = List.copyOf(diagnostics);
         referencedVariables = List.copyOf(referencedVariables);
         bindings = List.copyOf(bindings);
+        requiredVariables = List.copyOf(requiredVariables);
     }
 
     /**

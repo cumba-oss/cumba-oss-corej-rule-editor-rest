@@ -96,6 +96,7 @@ class RuleAnalyserTest
                         .containsAll(List.of("AEDECOD", "AETERM")),
                 a.referencedVariables().toString());
         assertEquals(List.of(), a.bindings());
+        assertEquals(List.of(), a.requiredVariables());
     }
 
 
@@ -193,6 +194,22 @@ class RuleAnalyserTest
                 """);
         assertEquals(List.of("$n", "$m"), RuleAnalyser.bindingsOf(check));
         assertEquals(List.of(), RuleAnalyser.bindingsOf(null));
+        var required = RuleAnalyser.readCheck("""
+                Core:
+                  Id: "X-2"
+                Requirements:
+                  Variables:
+                    All:
+                    - "TSPARMCD"
+                    - "TSVAL"
+                    Any:
+                    - "TSVAL"
+                    - "TSVALCD"
+                """);
+        assertEquals(List.of("TSPARMCD", "TSVAL", "TSVALCD"),
+                RuleAnalyser.requiredVariablesOf(required));
+        assertEquals(List.of(), RuleAnalyser.requiredVariablesOf(null));
+        assertEquals(List.of(), RuleAnalyser.requiredVariablesOf(check));
         assertEquals("rules-src/docs/FDA/FDA-SD1142.yaml",
                 RuleAnalyser.docsPathOf("rules-src/checks/FDA/FDA-SD1142.yaml"));
         assertNull(RuleAnalyser.docsPathOf("rules-src/docs/FDA/FDA-SD1142.yaml"));
