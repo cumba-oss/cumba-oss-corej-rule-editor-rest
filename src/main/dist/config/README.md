@@ -1,7 +1,7 @@
 # `config/` — external Spring configuration
 
 `application.yaml` here overrides the copy packaged inside the application jar. The launcher
-wires it up in `cumba-corej-rule-editor-rest.conf` as
+wires it up in `cumba-oss-corej-rule-editor-rest.conf` as
 
 ```ini
 spring.config.additional-location = ${env:COREJ_CONFIG_DIR:-${sys:corej.config.dir:-${bootstrap.dir}/config}}/
