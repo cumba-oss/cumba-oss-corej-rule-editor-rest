@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The runnable rule editor distribution (PLAN-rule-editor phase 4), shaped like
+    cumba-oss-corej-rest's.
+
+    Layout produced (see README.md § Running):
+
+        cumba-oss-corej-rule-editor-rest-<version>/
+        ├── cumba-oss-corej-rule-editor-rest.jar    the cumba-oss-bootstrap launcher
+        ├── cumba-oss-corej-rule-editor-rest.conf   its sidecar config — editable after unzip
+        ├── run.sh   run.bat
+        ├── config/                             external Spring config (application.yaml)
+        └── lib/                                this project's jar + every runtime dependency
+
+    ⭐ The launcher jar and the .conf MUST share a basename: the launcher strips ".jar"
+    off the jar it was loaded from, appends ".conf", and resolves that as a sibling. That
+    is the entire reason for <outputFileNameMapping> below.
+
+    ⚠ No rules/, rules-define/ or dictionaries/ here: the editor reads the corpus from GIT
+    (one workspace per user under editor.workspace-root), never from a bundled directory,
+    and the metadata store it needs from phase 3 on is a separate volume
+    (CDISC_METADATA_STORE — see docker-compose.yml).
+
+    SINGLE MODULE — the root pom IS the application — so the lib/ dependencySet sets
+    useProjectArtifact=TRUE, or the bundle ships every dependency and no application.
+-->
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 http://maven.apache.org/xsd/assembly-2.2.0.xsd">
+
+    <id>dist</id>
+    <formats>
+        <!-- zip: the release asset, matched by the release job's target/*-<version>.zip glob.
+             dir: the same tree exploded, so the smoke test and the Dockerfile can use it
+             without unzipping. -->
+        <format>zip</format>
+        <format>dir</format>
+    </formats>
+
+    <includeBaseDirectory>true</includeBaseDirectory>
+    <baseDirectory>cumba-oss-corej-rule-editor-rest-${project.version}</baseDirectory>
+
+    <dependencySets>
+        <!--
+            The launcher, at the bundle root, with its version stripped. Scope is `provided`
+            because that is how the dependency is declared: the launcher is supplied BY the
+            bundle and must never reach the application's own runtime classpath.
+        -->
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <useTransitiveDependencies>false</useTransitiveDependencies>
+            <scope>provided</scope>
+            <includes>
+                <include>net.cumba:cumba-oss-bootstrap</include>
+            </includes>
+            <outputFileNameMapping>cumba-oss-corej-rule-editor-rest.jar</outputFileNameMapping>
+        </dependencySet>
+
+        <!--
+            The application jar plus every runtime/transitive dependency, flat under lib/.
+            The .conf's `${bootstrap.dir}/lib/*.jar` glob is what turns this into a classpath.
+        -->
+        <dependencySet>
+            <outputDirectory>lib</outputDirectory>
+            <useProjectArtifact>true</useProjectArtifact>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <scope>runtime</scope>
+        </dependencySet>
+    </dependencySets>
+
+    <files>
+        <file>
+            <source>src/main/dist/cumba-oss-corej-rule-editor-rest.conf</source>
+            <outputDirectory>/</outputDirectory>
+        </file>
+        <file>
+            <source>src/main/dist/run.sh</source>
+            <outputDirectory>/</outputDirectory>
+            <!-- Explicit: the zip format does not carry the working tree's mode bits. -->
+            <fileMode>0755</fileMode>
+        </file>
+        <file>
+            <source>src/main/dist/run.bat</source>
+            <outputDirectory>/</outputDirectory>
+        </file>
+    </files>
+
+    <fileSets>
+        <!--
+            External Spring configuration. `spring.config.additional-location` in the .conf
+            points at this directory, so application.yaml here overrides the copy packaged
+            in the jar without restating it. Shipped so an operator can see that the
+            override file exists before they need it.
+        -->
+        <fileSet>
+            <directory>src/main/dist/config</directory>
+            <outputDirectory>config</outputDirectory>
+        </fileSet>
+    </fileSets>
+
+</assembly>

@@ -1,0 +1,2448 @@
+{
+  "components" : {
+    "schemas" : {
+      "Analyse" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          },
+          "docs" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Analysed" : {
+        "properties" : {
+          "analysis" : {
+            "$ref" : "#/components/schemas/Analysis"
+          },
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Analysis" : {
+        "properties" : {
+          "bindings" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "coreId" : {
+            "type" : "string"
+          },
+          "derived" : {
+            "$ref" : "#/components/schemas/Derived"
+          },
+          "diagnostics" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Diagnostic"
+            },
+            "type" : "array"
+          },
+          "loaded" : {
+            "type" : "boolean"
+          },
+          "parked" : {
+            "type" : "boolean"
+          },
+          "referencedVariables" : {
+            "items" : {
+              "$ref" : "#/components/schemas/VariableRef"
+            },
+            "type" : "array"
+          },
+          "scope" : {
+            "$ref" : "#/components/schemas/Scope"
+          },
+          "storeAvailable" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "BranchInfo" : {
+        "properties" : {
+          "current" : {
+            "type" : "boolean"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "isDefault" : {
+            "type" : "boolean"
+          },
+          "kind" : {
+            "enum" : [ "LOCAL", "REMOTE" ],
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "unpushed" : {
+            "$ref" : "#/components/schemas/UnpushedInfo"
+          }
+        },
+        "type" : "object"
+      },
+      "Branches" : {
+        "properties" : {
+          "branches" : {
+            "items" : {
+              "$ref" : "#/components/schemas/BranchInfo"
+            },
+            "type" : "array"
+          },
+          "current" : {
+            "type" : "string"
+          },
+          "defaultBranch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CdtExpectations" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "CdtParse" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CdtSplice" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          },
+          "dataset" : {
+            "$ref" : "#/components/schemas/Dataset"
+          }
+        },
+        "type" : "object"
+      },
+      "CdtText" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ChangedFile" : {
+        "properties" : {
+          "kind" : {
+            "enum" : [ "UNTRACKED", "ADDED", "MODIFIED", "DELETED", "CONFLICTING" ],
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Check" : {
+        "properties" : {
+          "detail" : {
+            "type" : "string"
+          },
+          "pass" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "CodelistHit" : {
+        "properties" : {
+          "conceptId" : {
+            "type" : "string"
+          },
+          "ctPackage" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "extensible" : {
+            "type" : "boolean"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "preferredTerm" : {
+            "type" : "string"
+          },
+          "submissionValue" : {
+            "type" : "string"
+          },
+          "termCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "terms" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CodelistTerm"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "CodelistLookup" : {
+        "properties" : {
+          "hits" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CodelistHit"
+            },
+            "type" : "array"
+          },
+          "query" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CodelistTerm" : {
+        "properties" : {
+          "conceptId" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "preferredTerm" : {
+            "type" : "string"
+          },
+          "submissionValue" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Column" : {
+        "properties" : {
+          "attrs" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "codelist" : {
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "length" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Commit" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CommitInfo" : {
+        "properties" : {
+          "author" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "sha" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Committed" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "commit" : {
+            "$ref" : "#/components/schemas/CommitInfo"
+          },
+          "head" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CreateBranch" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CsrfInfo" : {
+        "properties" : {
+          "headerName" : {
+            "description" : "the header a mutating request sends the token in",
+            "type" : "string"
+          },
+          "parameterName" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Dataset" : {
+        "properties" : {
+          "attrs" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "columns" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Column"
+            },
+            "type" : "array"
+          },
+          "fence" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "rows" : {
+            "items" : {
+              "items" : {
+                "type" : "string"
+              },
+              "type" : "array"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "DeleteBranch" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Derived" : {
+        "properties" : {
+          "authorities" : { },
+          "evaluationDomain" : {
+            "type" : "string"
+          },
+          "outputVariables" : {
+            "$ref" : "#/components/schemas/OutputVariables"
+          },
+          "sensitivity" : {
+            "type" : "string"
+          },
+          "sensitivityConfidence" : {
+            "type" : "string"
+          },
+          "sensitivityRationale" : {
+            "type" : "string"
+          },
+          "wildcardNames" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Diagnostic" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "document" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "range" : {
+            "$ref" : "#/components/schemas/Range"
+          },
+          "severity" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Directive" : {
+        "properties" : {
+          "line" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Directory" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "entries" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TreeEntry"
+            },
+            "type" : "array"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Discard" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "paths" : {
+            "description" : "the uncommitted paths the user confirmed losing (status.uncommitted)",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Discarded" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "discarded" : {
+            "description" : "the changes discarded",
+            "items" : {
+              "$ref" : "#/components/schemas/ChangedFile"
+            },
+            "type" : "array"
+          },
+          "head" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "EngineInfo" : {
+        "properties" : {
+          "languageLevel" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "maxBufferBytes" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "runTimeoutSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "storeAvailable" : {
+            "type" : "boolean"
+          },
+          "storeFormat" : {
+            "description" : "the open store's format version, -1 without a store",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "storeReason" : {
+            "description" : "why there is no store; empty when there is one",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Evaluation" : {
+        "properties" : {
+          "errored" : {
+            "type" : "boolean"
+          },
+          "executed" : {
+            "type" : "boolean"
+          },
+          "notExecutedReason" : {
+            "type" : "string"
+          },
+          "totalCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          },
+          "violated" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "Expect" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Expectations" : {
+        "properties" : {
+          "ats" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "lines" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "ExplorerTree" : {
+        "properties" : {
+          "anonymous" : {
+            "type" : "boolean"
+          },
+          "branch" : {
+            "type" : "string"
+          },
+          "families" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Family"
+            },
+            "type" : "array"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "languageLevel" : {
+            "description" : "the branch's rules-src/LANGUAGE-LEVEL, null when it declares none",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Family" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "rules" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Rule"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "FileContent" : {
+        "properties" : {
+          "blob" : {
+            "description" : "the git blob id of the content; send it back on write",
+            "type" : "string"
+          },
+          "branch" : {
+            "type" : "string"
+          },
+          "content" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Finding" : {
+        "properties" : {
+          "groupKey" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "keys" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "level" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "namedColumns" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "row" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "ruleId" : {
+            "type" : "string"
+          },
+          "seq" : {
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "usubjid" : {
+            "type" : "string"
+          },
+          "values" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          }
+        },
+        "type" : "object"
+      },
+      "FunctionInfo" : {
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "parameters" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FunctionParameter"
+            },
+            "type" : "array"
+          },
+          "returnType" : {
+            "type" : "string"
+          },
+          "sections" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "signature" : {
+            "type" : "string"
+          },
+          "summary" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "FunctionParameter" : {
+        "properties" : {
+          "collector" : {
+            "type" : "boolean"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "boolean"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Functions" : {
+        "properties" : {
+          "functions" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FunctionInfo"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Hit" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "docsPath" : {
+            "type" : "string"
+          },
+          "family" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "snippets" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Snippet"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "LoginRequest" : {
+        "properties" : {
+          "login" : {
+            "description" : "the forge login name",
+            "example" : "mw",
+            "type" : "string"
+          },
+          "token" : {
+            "description" : "a personal access token of that login",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "MergeOutcome" : {
+        "properties" : {
+          "head" : {
+            "type" : "string"
+          },
+          "ref" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "OutputVariables" : {
+        "properties" : {
+          "authored" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "derived" : {
+            "type" : "boolean"
+          },
+          "effective" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "excluded" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Parsed" : {
+        "properties" : {
+          "datasets" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Dataset"
+            },
+            "type" : "array"
+          },
+          "directives" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Directive"
+            },
+            "type" : "array"
+          },
+          "error" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "PushOutcome" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "created" : {
+            "type" : "boolean"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Pushed" : {
+        "properties" : {
+          "pullRequestUrl" : {
+            "description" : "the forge's create-pull-request page for the branch",
+            "type" : "string"
+          },
+          "push" : {
+            "$ref" : "#/components/schemas/PushOutcome"
+          }
+        },
+        "type" : "object"
+      },
+      "Range" : {
+        "properties" : {
+          "endColumn" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "endLine" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "startColumn" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "startLine" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Related" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "related" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RelatedRule"
+            },
+            "type" : "array"
+          },
+          "rule" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RelatedRule" : {
+        "properties" : {
+          "coreId" : {
+            "type" : "string"
+          },
+          "exists" : {
+            "type" : "boolean"
+          },
+          "family" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "relation" : {
+            "type" : "string"
+          },
+          "via" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RepositoryInfo" : {
+        "properties" : {
+          "forge" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "owner" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Result" : {
+        "properties" : {
+          "message" : {
+            "type" : "string"
+          },
+          "ruleId" : {
+            "type" : "string"
+          },
+          "runtimeMillis" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "statusMessage" : {
+            "type" : "string"
+          },
+          "totalViolationCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          },
+          "violationCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Rule" : {
+        "properties" : {
+          "docsPath" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "marker" : {
+            "enum" : [ "CLEAN", "MODIFIED", "NEW" ],
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Run" : {
+        "properties" : {
+          "content" : {
+            "type" : "string"
+          },
+          "docs" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "scenarioContent" : {
+            "type" : "string"
+          },
+          "scenarioPath" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RunReport" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "durationMs" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "evaluation" : {
+            "$ref" : "#/components/schemas/Evaluation"
+          },
+          "expectations" : {
+            "$ref" : "#/components/schemas/Expectations"
+          },
+          "findings" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Finding"
+            },
+            "type" : "array"
+          },
+          "locations" : {
+            "$ref" : "#/components/schemas/Check"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "reportJson" : {
+            "type" : "string"
+          },
+          "results" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Result"
+            },
+            "type" : "array"
+          },
+          "ruleDiagnostics" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Diagnostic"
+            },
+            "type" : "array"
+          },
+          "scopeGate" : {
+            "$ref" : "#/components/schemas/ScopeGate"
+          },
+          "skip" : {
+            "$ref" : "#/components/schemas/Skip"
+          },
+          "verdict" : {
+            "$ref" : "#/components/schemas/Check"
+          },
+          "worker" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RunResult" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "report" : {
+            "$ref" : "#/components/schemas/RunReport"
+          }
+        },
+        "type" : "object"
+      },
+      "Scenario" : {
+        "properties" : {
+          "coreId" : {
+            "type" : "string"
+          },
+          "datasets" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "domain" : {
+            "type" : "string"
+          },
+          "expect" : {
+            "type" : "string"
+          },
+          "expectViolationAtCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "expectViolationCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "parseError" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "sidecars" : {
+            "type" : "boolean"
+          },
+          "size" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Scenarios" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "family" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "rule" : {
+            "type" : "string"
+          },
+          "suite" : {
+            "$ref" : "#/components/schemas/Suite"
+          }
+        },
+        "type" : "object"
+      },
+      "Scope" : {
+        "properties" : {
+          "datasets" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ScopeDataset"
+            },
+            "type" : "array"
+          },
+          "missingProducts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "products" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "variables" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Variable"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "ScopeDataset" : {
+        "properties" : {
+          "dataStructure" : {
+            "type" : "string"
+          },
+          "datasetClass" : {
+            "type" : "string"
+          },
+          "inScope" : {
+            "type" : "boolean"
+          },
+          "mismatch" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "product" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ScopeGate" : {
+        "properties" : {
+          "inScope" : {
+            "type" : "boolean"
+          },
+          "mismatch" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Search" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "hits" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Hit"
+            },
+            "type" : "array"
+          },
+          "query" : {
+            "type" : "string"
+          },
+          "total" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "ServiceInfo" : {
+        "properties" : {
+          "anonymousRead" : {
+            "description" : "anonymous read access is served right now",
+            "type" : "boolean"
+          },
+          "commit" : {
+            "type" : "string"
+          },
+          "engine" : {
+            "$ref" : "#/components/schemas/EngineInfo"
+          },
+          "repository" : {
+            "$ref" : "#/components/schemas/RepositoryInfo"
+          },
+          "service" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SessionInfo" : {
+        "properties" : {
+          "defaultBranch" : {
+            "description" : "the repository's default branch; never writable",
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "login" : {
+            "type" : "string"
+          },
+          "mode" : {
+            "enum" : [ "EDIT", "READ_ONLY" ],
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Skip" : {
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Snippet" : {
+        "properties" : {
+          "file" : {
+            "type" : "string"
+          },
+          "line" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Status" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "defaultBranch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "ignored" : {
+            "description" : "changes outside the editable trees (never staged)",
+            "items" : {
+              "$ref" : "#/components/schemas/ChangedFile"
+            },
+            "type" : "array"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "uncommitted" : {
+            "description" : "saved, uncommitted changes under the editable trees",
+            "items" : {
+              "$ref" : "#/components/schemas/ChangedFile"
+            },
+            "type" : "array"
+          },
+          "unpushed" : {
+            "$ref" : "#/components/schemas/UnpushedInfo"
+          }
+        },
+        "type" : "object"
+      },
+      "Suite" : {
+        "properties" : {
+          "directory" : {
+            "type" : "string"
+          },
+          "otherFiles" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "scenarios" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Scenario"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "SwitchBranch" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "TreeEntry" : {
+        "properties" : {
+          "directory" : {
+            "type" : "boolean"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "size" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "UnpushedInfo" : {
+        "properties" : {
+          "aheadCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "behindCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "commits" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CommitInfo"
+            },
+            "type" : "array"
+          },
+          "hasTrackingRef" : {
+            "type" : "boolean"
+          },
+          "unpushed" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "Updated" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "merge" : {
+            "$ref" : "#/components/schemas/MergeOutcome"
+          }
+        },
+        "type" : "object"
+      },
+      "Variable" : {
+        "properties" : {
+          "classLevel" : {
+            "type" : "boolean"
+          },
+          "codelists" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "concrete" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "core" : {
+            "type" : "string"
+          },
+          "datasets" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "products" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "VariableRef" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "quoted" : {
+            "type" : "boolean"
+          },
+          "where" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "WriteFile" : {
+        "properties" : {
+          "blob" : {
+            "description" : "the blob read; null when creating a file",
+            "type" : "string"
+          },
+          "branch" : {
+            "type" : "string"
+          },
+          "content" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Written" : {
+        "properties" : {
+          "blob" : {
+            "type" : "string"
+          },
+          "branch" : {
+            "type" : "string"
+          },
+          "head" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "The rule editor's REST API: log in with a forge token, work on a branch of the bound rule repository in a per-user git workspace, read and write rule files, commit, push, and search the corpus. Mutating requests carry the client's {branch, head, blob} and are refused with 409 STALE when the workspace moved on.",
+    "license" : {
+      "name" : "AGPL-3.0-only",
+      "url" : "https://www.gnu.org/licenses/agpl-3.0.txt"
+    },
+    "title" : "corej CDISC Rule Editor API",
+    "version" : "1.0"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/api/analyse" : {
+      "post" : {
+        "operationId" : "analyse",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Analyse"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Analysed"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Analyse a rule buffer: diagnostics, derived fields, scope universe, referenced variables (in-process, no execution)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/branches" : {
+      "get" : {
+        "operationId" : "branches",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "fetch",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branches"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Local and remote branches; fetch=true refreshes (and prunes) from the remote first",
+        "tags" : [ "repository" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateBranch"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branches"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Create a branch from the remote default branch and switch to it (clean tree required)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/branches/delete" : {
+      "post" : {
+        "operationId" : "delete",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DeleteBranch"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branches"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Delete a local branch that holds nothing unpushed (a merged, pruned branch)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/branches/switch" : {
+      "post" : {
+        "operationId" : "switchTo",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SwitchBranch"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branches"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Check out a local or remote branch (clean tree required)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/branches/update-from-default" : {
+      "post" : {
+        "operationId" : "updateFromDefault",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Expect"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Updated"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Fetch and merge the remote default branch into the current branch (clean tree; conflicts abort)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/branches/update-from-remote" : {
+      "post" : {
+        "operationId" : "updateFromRemote",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Expect"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Updated"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Fetch and merge the remote counterpart of the current branch (after a non-fast-forward push)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/cdt/expectations" : {
+      "post" : {
+        "operationId" : "cdtExpectations",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CdtExpectations"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CdtText"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Replace the #expectViolation* lines of a scenario text with the confirmed ones (take actual as expected)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/cdt/parse" : {
+      "post" : {
+        "operationId" : "cdtParse",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CdtParse"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Parsed"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Parse a scenario text into its dataset blocks and prelude directives (the engine's own parser; cells in its field encoding)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/cdt/splice" : {
+      "post" : {
+        "operationId" : "cdtSplice",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CdtSplice"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CdtText"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Rewrite one dataset block of a scenario text from the grid; everything else stays byte for byte (400 CDT_UNREPRESENTABLE with the engine's message)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/commit" : {
+      "post" : {
+        "operationId" : "commit",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Commit"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Committed"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Stage every saved change under the editable trees and commit it (hooks off)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/discard" : {
+      "post" : {
+        "operationId" : "discard",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Discard"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Discarded"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Discard every saved, uncommitted change under the editable trees: restore tracked files from HEAD, delete new ones (the confirmed paths must be the current ones)",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/engine/ct" : {
+      "get" : {
+        "operationId" : "codelist",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "codelist",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "term",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CodelistLookup"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "A codelist of the metadata store's CT, by C-code or submission value, newest package first (tooltips); empty hits without a store",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/engine/functions" : {
+      "get" : {
+        "operationId" : "functions",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Functions"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The rule language's functions: registry signatures joined with the branch's rule-guide/reference/functions.md help text",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/engine/schema" : {
+      "get" : {
+        "operationId" : "schema",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The branch's authored rule schema (rule-check.schema.json) for key and enum completion and key tooltips; 404 NO_SCHEMA when the branch carries none",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/explorer" : {
+      "get" : {
+        "operationId" : "explorer",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExplorerTree"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Families and their rules, with NEW / MODIFIED markers from git status",
+        "tags" : [ "corpus" ]
+      }
+    },
+    "/api/files" : {
+      "get" : {
+        "operationId" : "list",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Directory"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List one directory level under the editable trees",
+        "tags" : [ "files" ]
+      }
+    },
+    "/api/files/content" : {
+      "get" : {
+        "operationId" : "read",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FileContent"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "A file's content (UTF-8) with its blob id, branch and HEAD",
+        "tags" : [ "files" ]
+      },
+      "put" : {
+        "operationId" : "write",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/WriteFile"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Written"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Save: write a file's content if the client's blob is still current",
+        "tags" : [ "files" ]
+      }
+    },
+    "/api/info" : {
+      "get" : {
+        "operationId" : "info",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Service name, build version and the bound repository",
+        "tags" : [ "info" ]
+      }
+    },
+    "/api/push" : {
+      "post" : {
+        "operationId" : "push",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Expect"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Pushed"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Push the current branch, never forced; answers the create-pull-request link",
+        "tags" : [ "repository" ]
+      }
+    },
+    "/api/related" : {
+      "get" : {
+        "operationId" : "related",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "rule",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Related"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Rules related to one: a shared authority reference across families, the repository's equivalence / relation classes and minted parentage where it carries the registers (§5.5)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/run" : {
+      "post" : {
+        "operationId" : "run",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Run"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Run one rule buffer against one scenario buffer in a child JVM worker (503 RUN_BUSY beyond the queue, 429 RATE_LIMITED for anonymous clients)",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/scenarios" : {
+      "get" : {
+        "operationId" : "scenarios",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "rule",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Scenarios"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The scenarios of a rule's suite directory with what their prelude declares",
+        "tags" : [ "engine" ]
+      }
+    },
+    "/api/search" : {
+      "get" : {
+        "operationId" : "search",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "q",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "variable",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "scope",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "function",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "standard",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "version",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "noScenarios",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 200,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Search"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Free text over check and docs YAML (words ANDed, quotes make a phrase), plus the semantic filters: mentions a variable (--X resolved through the scope), scoped to a domain / class, uses a function, status, standard + version, has no scenarios — all ANDed",
+        "tags" : [ "corpus" ]
+      }
+    },
+    "/api/session" : {
+      "get" : {
+        "operationId" : "current",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The current session's identity and mode (401 without a session)",
+        "tags" : [ "session" ]
+      }
+    },
+    "/api/session/csrf" : {
+      "get" : {
+        "operationId" : "csrf",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CsrfInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The CSRF token to send as X-CSRF-TOKEN on every mutating request, the login included; re-fetch after login and after logout",
+        "tags" : [ "session" ]
+      }
+    },
+    "/api/session/login" : {
+      "post" : {
+        "operationId" : "login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Probe the forge with a personal access token and open a session; the token decides the mode (edit needs push rights AND a pushable token)",
+        "tags" : [ "session" ]
+      }
+    },
+    "/api/session/logout" : {
+      "post" : {
+        "operationId" : "logout",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "summary" : "Drop the session and its token",
+        "tags" : [ "session" ]
+      }
+    },
+    "/api/status" : {
+      "get" : {
+        "operationId" : "status",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Status"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The dirty states the server tracks: uncommitted files and unpushed commits",
+        "tags" : [ "repository" ]
+      }
+    }
+  },
+  "servers" : [ {
+    "description" : "Generated server url",
+    "url" : "http://localhost"
+  } ],
+  "tags" : [ {
+    "description" : "Read and write files under rules-src and the scenario tree",
+    "name" : "files"
+  }, {
+    "description" : "Service metadata",
+    "name" : "info"
+  }, {
+    "description" : "Login, identity, CSRF, logout",
+    "name" : "session"
+  }, {
+    "description" : "Explorer tree and free-text search",
+    "name" : "corpus"
+  }, {
+    "description" : "Branches, status, commit, push, update",
+    "name" : "repository"
+  }, {
+    "description" : "Analysis, completion, scenarios, grid and runs",
+    "name" : "engine"
+  } ]
+}

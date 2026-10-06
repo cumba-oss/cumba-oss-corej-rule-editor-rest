@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+
+    <!-- ================================================================ -->
+    <!-- Targeted suppressions                                            -->
+    <!--    One <Match> per unique (class, bug pattern) tuple.            -->
+    <!-- ================================================================ -->
+
+    <Match>
+        <!-- EI_EXPOSE_REP: @ConfigurationProperties accessors return their
+             nested config objects by reference on purpose — Spring binds
+             values onto those very instances. There is nothing mutable to
+             defensively copy here; the objects are the binding target.
+             (The same suppression as cumba-corej-rest's CorejProperties.) -->
+        <Class name="net.cumba.corej.editor.config.EditorProperties" />
+        <Bug pattern="EI_EXPOSE_REP" />
+    </Match>
+
+    <Match>
+        <!-- EI_EXPOSE_REP2: constructors store Spring-injected singleton
+             collaborators (the forge client, the workspace service, the
+             security context repository, the anonymous clone). Holding the
+             injected reference is the whole point of constructor injection;
+             copying a Spring bean is neither possible nor desirable. -->
+        <Or>
+            <Class name="net.cumba.corej.editor.session.LoginService" />
+            <Class name="net.cumba.corej.editor.web.Access" />
+        </Or>
+        <Method name="&lt;init&gt;" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
+    <Match>
+        <!-- EI_EXPOSE_REP / EI_EXPOSE_REP2: a snapshot holds the JGit Repository it
+             reads from (a shared, thread-safe handle owned by AnonymousClone) and the
+             commit ObjectId, which JGit makes immutable (only MutableObjectId mutates,
+             and none is ever handed in). Sharing the handle is the design of §5.8.4:
+             the snapshot reads the object database at one commit while fetches move
+             the ref. -->
+        <Or>
+            <Class name="net.cumba.corej.editor.git.SnapshotSource" />
+            <Class name="net.cumba.corej.editor.git.AnonymousClone$Snapshot" />
+        </Or>
+        <Or>
+            <Bug pattern="EI_EXPOSE_REP" />
+            <Bug pattern="EI_EXPOSE_REP2" />
+        </Or>
+    </Match>
+
+    <Match>
+        <!-- THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION: HttpSecurity.build()
+             declares `throws Exception`, so the SecurityFilterChain bean method
+             has to as well. That is Spring Security's own idiom. -->
+        <Class name="net.cumba.corej.editor.config.SecurityConfig" />
+        <Method name="editorSecurity" />
+        <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION" />
+    </Match>
+
+    <Match>
+        <!-- CT_CONSTRUCTOR_THROW: the constructor validates editor.forge.api-url and
+             throws on a blank value. The finalizer-attack this pattern guards against
+             needs a subclass with a finalizer: the only subclasses are the two final
+             forge clients in this package, and Object.finalize is deprecated for
+             removal. Failing fast on a missing URL is the behaviour wanted. -->
+        <Class name="net.cumba.corej.editor.forge.HttpForgeClient" />
+        <Bug pattern="CT_CONSTRUCTOR_THROW" />
+    </Match>
+
+</FindBugsFilter>

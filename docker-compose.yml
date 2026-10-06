@@ -1,0 +1,78 @@
+# The rule editor as two containers (PLAN-rule-editor §4.2 shape 2, RE-Q6):
+#
+#   rule-editor-web   nginx serving the built SPA and proxying /api (and the OpenAPI
+#                     paths) to the rest container — so the browser sees ONE origin and
+#                     the session cookie + CSRF need no cross-site handling;
+#   rule-editor-rest  the API, with the per-user git workspaces and the metadata store
+#                     on volumes.
+#
+# Build contexts are the two sibling checkouts of the meta repository
+# (databrowser-meta/cumba-corej-rule-editor-{rest,web}). Before `docker compose up --build`:
+#
+#     (cd ../cumba-oss-corej-rule-editor-web && npm ci && npm run build)      # dist/ for the nginx image
+#     mvn -B clean package                                                # the exploded bundle for the rest image
+#
+# Then point the service at your repository and forge — EDIT the environment below or
+# mount a config directory at /etc/rule-editor (config/README.md) — and open
+# http://localhost:8080/. The repository is never bundled: every user's workspace is a
+# clone fetched with THEIR token (§5.1.5–5.1.6).
+#
+# ⚠ THE METADATA STORE. Everything that needs CDISC Library content — the analysis,
+# completion, tooltips, the scenario runs — reads OUR metadata store, never the
+# Library's pickle or web API (databrowser-meta CLAUDE.md). The store is NOT shipped:
+# seed it once, at the engine's store format (5), with the coreJ CLI or data browser
+# flow that invokes the seeders (PickleStoreSeeder / WebApiStoreSeeder), and put the
+# resulting FILE into the `metadata-store` volume as metadata-store.zip (the path
+# CDISC_METADATA_STORE names below — a file, not the directory). An older format is
+# refused at startup (re-seed once) and the service then runs without a store: the
+# analysis still works, scope completion is empty, a scenario needing the Library fails
+# with that reason; a newer format is never replaced automatically.
+#
+# ⚠ MEMORY. JAVA_OPTS sizes the API JVM only. Every run is a CHILD JVM with its own
+# heap (EDITOR_RUN_MAX_HEAP, default 1g), up to EDITOR_RUN_MAX_CONCURRENT at once,
+# killed past EDITOR_RUN_TIMEOUT: give the container JAVA_OPTS heap + max-concurrent ×
+# max-heap, or lower the two run settings.
+#
+# ⚠ Written in a sandbox WITHOUT docker: the file is validated for shape only. The
+# first `docker compose up` is the real test (then run src/test/smoke.sh's steps
+# against http://localhost:8080).
+
+services:
+  rule-editor-rest:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-0.1.0-SNAPSHOT}
+    environment:
+      # One instance serves ONE repository on ONE forge (§5.1.1, O9).
+      EDITOR_REPOSITORY_URL: ${EDITOR_REPOSITORY_URL:-https://github.com/cumba-oss/cumba-oss-corej-rules.git}
+      EDITOR_FORGE_TYPE: ${EDITOR_FORGE_TYPE:-github}
+      EDITOR_FORGE_API_URL: ${EDITOR_FORGE_API_URL:-https://api.github.com}
+      EDITOR_WORKSPACE_ROOT: /var/lib/rule-editor/workspaces
+      # The engine reads the store FILE from here (see the note above).
+      CDISC_METADATA_STORE: /var/lib/rule-editor/metadata-store/metadata-store.zip
+      # The API JVM; the run workers are separate JVMs sized by the three settings below.
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx1g}
+      EDITOR_RUN_MAX_HEAP: ${EDITOR_RUN_MAX_HEAP:-1g}
+      EDITOR_RUN_MAX_CONCURRENT: ${EDITOR_RUN_MAX_CONCURRENT:-2}
+      EDITOR_RUN_TIMEOUT: ${EDITOR_RUN_TIMEOUT:-PT60S}
+    volumes:
+      - workspaces:/var/lib/rule-editor/workspaces
+      - metadata-store:/var/lib/rule-editor/metadata-store
+    # Not published: only nginx talks to it. Uncomment to reach the API directly.
+    # ports:
+    #   - "8081:8081"
+    restart: unless-stopped
+
+  rule-editor-web:
+    build:
+      context: ../cumba-oss-corej-rule-editor-web
+    depends_on:
+      - rule-editor-rest
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  workspaces:
+  metadata-store:

@@ -1,0 +1,24 @@
+# `config/` — external Spring configuration
+
+`application.yaml` here overrides the copy packaged inside the application jar. The launcher
+wires it up in `cumba-oss-corej-rule-editor-rest.conf` as
+
+```ini
+spring.config.additional-location = ${env:COREJ_CONFIG_DIR:-${sys:corej.config.dir:-${bootstrap.dir}/config}}/
+```
+
+`additional-location` (not `location`) means the packaged defaults still apply and this file
+only overrides the keys it sets. `COREJ_CONFIG_DIR` points the whole mechanism somewhere else.
+
+⚠ The trailing slash in that value is required, and it is appended by the `.conf` — Spring Boot
+reads a value without one as a *file* path and refuses to start (*"If the location is meant to
+reference a directory, it must end in '/'"*). Set `COREJ_CONFIG_DIR` (or `-Dcorej.config.dir`)
+to a directory **without** one.
+
+⛔ `-Dspring.config.additional-location=…` on the command line does **not** work: the `.conf`
+applies its `[properties]` with an unconditional `System.setProperty` and overwrites it.
+
+What belongs here: the bound repository and forge (`editor.repository.url`, `editor.forge.*`),
+the workspace root, the port, the session cookie flags (`secure: false` for plain HTTP, `domain`
+for sibling subdomains) and the CORS allow-list (`editor.cors.allowed-origins`). The packaged
+`application.yaml` documents every key.

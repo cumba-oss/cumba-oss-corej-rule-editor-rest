@@ -1,0 +1,4 @@
+# Only the exploded distribution reaches the image (Dockerfile): keep the context small
+# and keep sources, caches and git out of it.
+*
+!target/cumba-oss-corej-rule-editor-rest-*/

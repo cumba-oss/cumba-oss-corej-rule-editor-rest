@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Project-wide SpotBugs exclude filter. Applied to every module in
+    addition to that module's own spotbugs_ignore.xml (if any). Wired
+    via the parent pom's `<excludeFilterFile>` reference in
+    pluginManagement and the `spotbugs-module-ignore` profile.
+
+    Only categories that are structurally false-positive in this
+    project belong here. Module-specific suppressions (a single
+    class/field tuple) stay in the per-module spotbugs_ignore.xml.
+-->
+<FindBugsFilter>
+
+    <Match>
+        <!-- The project does not use Java Object Serialization anywhere.
+             Persisted state is Jackson JSON end-to-end (config files,
+             remote-RPC wire format, validation reports, etc.). Swing
+             components and Jackson types inherit Serializable transitively
+             but no class is ever written via ObjectOutputStream.
+
+             Non-Serializable instance fields are marked `transient` to
+             silence the javac [serial] lint. SpotBugs then flags those
+             transient fields as "not restored on deserialisation" — true
+             but irrelevant: the deserialisation path is never exercised. -->
+        <Bug pattern="SE_TRANSIENT_FIELD_NOT_RESTORED" />
+    </Match>
+
+    <Match>
+        <!-- Reported only since SpotBugs 4.10.0, which added *partial* JSpecify support:
+
+               "Add partial support for org.jspecify.annotations.Nullable … aliased to the
+                closest existing SpotBugs nullness annotations. This is not a complete
+                implementation of the JSpecify spec."
+
+             This project completed a project-wide JSpecify rollout, so 4.10 suddenly sees
+             thousands of @Nullable annotations it previously ignored: the count went from 0
+             under 4.9.8.3 to 313 under 4.10.4.0, across 17 modules. The flagged methods are
+             overwhelmingly Lombok-generated @Nullable getters on the tolerant-wire-format
+             CDISC rule model (CheckConditionLeaf.getValue, Rule.getCore, Operation.getName,
+             RulePackage.getRules, … 100 distinct methods).
+
+             NullAway already enforces exactly this contract with a COMPLETE JSpecify
+             implementation, and more strictly than SpotBugs is being asked to: the NullAway
+             profile sets -Xep:NullAway:ERROR with JSpecifyMode=true,
+             AcknowledgeRestrictiveAnnotations=true and AnnotatedPackages=net.cumba, and the
+             build is green under it. So these are duplicate coverage from an admittedly
+             partial implementation, and the complete checker is the one to trust.
+
+             THE OVERLAP IS A MEASUREMENT, NOT AN INVARIANT THIS FILTER ENFORCES. A SpotBugs
+             Match cannot say "only when the callee is outside net.cumba", so this entry is
+             unconditional and also silences the one category SpotBugs would genuinely add
+             over NullAway: a null-returning callee OUTSIDE net.cumba, which NullAway treats
+             as non-null because the package is unannotated.
+
+             SO: RE-RUN THE CALLEE CLASSIFICATION ON EVERY SpotBugs BUMP. For each
+             NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE in every target/spotbugsXml.xml, read the
+             Method element whose role is METHOD_CALLED and confirm its classname starts with
+             net.cumba. Any that does not is NOT covered by NullAway and must be triaged on
+             its own merits before this filter is kept.
+
+             The caveat and the protocol are ported up from cumba-oss-corej, which performed
+             that classification (22 distinct callees, all inside net.cumba) and recorded the
+             re-run instruction; the OSS twins carry their own measured counts.
+
+             Revisit if SpotBugs completes its JSpecify implementation, or if NullAway is ever
+             removed or demoted below ERROR. -->
+        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE" />
+    </Match>
+
+    <Match>
+        <!-- Also new in 4.10.x, and 24 of the 24 occurrences are the same intentional shape:
+             a package-private/protected member overridden as public in a nested formatter or
+             helper class (every SASFormatFactory$*Formatter, for instance). Widening on
+             override is deliberate here — the nested types implement a public SPI while their
+             base declares the method protected. Nothing is "increased" that was meant to stay
+             hidden. -->
+        <Bug pattern="IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY" />
+    </Match>
+
+</FindBugsFilter>

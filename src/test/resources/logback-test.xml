@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Test-only Logback configuration, copied from cumba-corej-rest: the ONE repo family whose SLF4J
+    backend is Logback (Spring Boot's default), so logging-test.properties (JUL) does not reach it.
+
+    LOG_EXCEPTION_CONVERSION_WORD=%nopex: a passing test that asserts a thrown exception must not
+    dump the production catch/log/rethrow trace into the build log. CONSOLE_LOG_THRESHOLD=WARN
+    filters the APPENDER, not the logger - records are still created, so a capture appender still
+    sees them (the stack-wide "no application INFO in the build log" rule, .claude/docs/build-gates.md
+    in databrowser-meta). Both properties are set BEFORE the includes so they win over Boot's
+    defaults.xml declarations.
+
+    Deliberately NOT a test application.yaml: that would SHADOW src/main/resources/application.yaml
+    on the test classpath and take the app's real configuration with it.
+-->
+<configuration>
+
+    <property name="LOG_EXCEPTION_CONVERSION_WORD" value="%nopex" />
+    <property name="CONSOLE_LOG_THRESHOLD" value="WARN" />
+
+    <include resource="org/springframework/boot/logging/logback/defaults.xml" />
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml" />
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+</configuration>

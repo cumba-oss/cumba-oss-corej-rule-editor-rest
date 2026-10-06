@@ -1,0 +1,459 @@
+# GitHub Actions CI — build, test and static-analysis gates.
+#
+# This is the PUBLIC counterpart to .gitea/workflows/main.yml. It runs the
+# same four-pass ladder against the same gates, so a fork or an outside
+# contributor's PR is held to the standard the internal build enforces.
+#
+# ⚠ It is deliberately NOT a copy of the Gitea workflow. Four things invert,
+# and each one breaks the build if carried across:
+#
+#   1. NO CONTAINER. The Gitea job runs in a private image on an internal
+#      registry, which a GitHub runner cannot pull. Java comes from
+#      actions/setup-java instead.
+#   2. ARTIFACT ACTIONS TRACK THE LATEST MAJOR — the exact OPPOSITE of the
+#      Gitea file, which is pinned to @v3 because act_runner implements the
+#      GHES-style artifact API and rejects v4+. On GitHub, v3 is retired and
+#      old majors get force-migrated off deprecated Node runtimes. Neither pin
+#      is portable; do not "unify" them, and do not bump the Gitea file to
+#      match — it would break that runner.
+#   3. NO MAVEN MIRROR. Everything resolves from Maven Central. Verified by a
+#      cold build with an empty local repo and no settings.xml: 1030
+#      artifacts, all from `central`.
+#   4. NO SONAR, NO DEPLOY, NO RELEASE. Those target internal hosts. Releases
+#      and Maven Central publishing are deliberately out of scope here and
+#      are being added in later steps.
+#
+# Nothing in the pom is CI-specific: `mvn install` with no -P builds the whole
+# reactor, so the commands below match what a developer runs locally.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+    branches: [main, master]
+  # Manual DRY RUN of the publishing path. The release path only executes on
+  # tags, so every defect in it has cost a tag to discover (v0.0.1 metadata,
+  # v0.0.3 gpg). This runs the full ladder and the real signing on a real
+  # runner, then stops short of uploading — see central.skipPublishing below.
+  workflow_dispatch:
+
+# Supersede an in-flight run when new commits land on the same ref. The Pitest
+# pass is the long pole, so without this two runs compete for a runner.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a tag run — it publishes a release. Branch runs supersede.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The mutation pass is single-threaded and by far the longest step; cap the
+    # job so a hung minion cannot hold a runner indefinitely.
+    #
+    # ⚠ 120, not the 45 the other cumba-oss repos use. cumba-oss-corej-core
+    # generates ~14,400 mutations - an order of magnitude more than any module in
+    # commons / formats / datatable, whose whole build job finishes in 1-3 minutes.
+    # The first public run was CANCELLED at exactly 45m24s with Pitest still going
+    # after 39m45s. That was this cap, not a GitHub limit: Actions is free and
+    # unmetered for public repositories, and the hard ceiling is 6 hours per job.
+    #
+    # A cold run has to complete ONCE for ~/.pitest-history to be worth restoring;
+    # warm runs on the other repos take well under a minute. Revisit once the
+    # history cache is established, ideally by giving Pitest its own job.
+    timeout-minutes: 120
+    # Consumed by the release job to name the release without recomputing it.
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    defaults:
+      run:
+        # `shell: bash` gives `bash -eo pipefail`, so a failed `mvn ... | tee`
+        # propagates instead of returning tee's exit code (0).
+        shell: bash
+    env:
+      # Every static-analysis check that is report-only locally is flipped to
+      # "fail on finding" here. Pitest is NOT in this list — it is the heaviest
+      # gate and runs LAST in its own pass, so a cheap failure aborts the build
+      # before any mutation work happens.
+      MAVEN_CI_GATES: -Dmaven.compiler.failOnWarning=true -Dspotless.check=true -Dpmd.failOnViolation=true -Dspotbugs.failOnError=true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # Restore at the top; save in a matching step at the end (not
+      # setup-java's built-in cache) so a run that downloads new dependencies
+      # and then fails still persists them, warming the next — likely still red
+      # — run. Content-keyed on the poms, so once an entry exists for these
+      # poms the save is a no-op.
+      - name: Restore Maven dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Show toolchain
+        run: |
+          java -version
+          mvn -version
+          python3 --version
+          git --version
+
+      # A tag yields its own version (v1.2.3 -> 1.2.3); anything else keeps the
+      # pom's SNAPSHOT default. Identical logic to the Gitea workflow, so the
+      # same tag produces identically-versioned jars on both platforms.
+      - name: Determine revision
+        id: ver
+        run: |
+          echo "GITHUB_REF_NAME=${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            # ⛔ Read the dev version from the pom; do NOT hardcode it. This line said
+            # 0.1.0-SNAPSHOT in all eight repos, which stopped being any repo's dev
+            # version the first time a line moved on -- so this lane gated a version
+            # unrelated to the one it was building. The comment above already claimed
+            # the pom default was being used; now it is. Matches the Gitea workflow.
+            VERSION="$(sed -n 's:.*<revision>\(.*\)</revision>.*:\1:p' pom.xml | head -1)"
+            if [[ -z "$VERSION" || "$VERSION" != *-SNAPSHOT ]]; then
+                echo "::error::pom.xml <revision> is '$VERSION' - expected a -SNAPSHOT dev version." >&2
+                exit 1
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      # Pass 1 (cheapest, most common failure): spotless across the WHOLE
+      # reactor. Fails in seconds on formatting drift, before a class is
+      # compiled.
+      - name: Spotless check
+        run: mvn -B spotless:check -Drevision=${{ steps.ver.outputs.version }}
+
+      # Pass 2: compile + Error Prone / NullAway + javac -Xlint warnings gate.
+      - name: Build
+        run: mvn -B test-compile -Drevision=${{ steps.ver.outputs.version }} ${MAVEN_CI_GATES} | tee maven-build.log
+
+      - name: Upload Maven Build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maven-build-log
+          path: maven-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Pass 3: unit tests + JaCoCo + PMD + SpotBugs. Every cheaper gate must
+      # be green across ALL modules before any module spends time mutating.
+      - name: Test & Verify
+        run: mvn -B install -Drevision=${{ steps.ver.outputs.version }} ${MAVEN_CI_GATES} | tee maven-verify.log
+
+      - name: Upload Maven Test log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maven-verify-log
+          path: maven-verify.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload static-analysis reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: analysis-reports
+          path: |
+            **/target/spotbugsXml.xml
+            **/target/pmd.xml
+            **/target/site/jacoco/**
+            **/target/site/jacoco-aggregate/**
+            **/target/surefire-reports/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Restored only here, immediately before the mutation pass, and only if we
+      # reach it — a run that failed an earlier gate never pulls this cache.
+      # ⚠ HOME, not the repo root: actions/checkout runs `git clean -ffdx` on a
+      # reused workspace and `-x` deletes IGNORED files too, so a gitignored
+      # in-repo path would not be safe. The pom pins the history to
+      # ${user.home} to match.
+      - name: Restore Pitest history
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.pitest-history
+          key: ${{ runner.os }}-pitest-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-pitest-
+
+      # Pass 4 (heaviest, LAST): mutation testing. `-DskipTests` suppresses the
+      # redundant surefire re-run (pitest forks its own test JVMs); the pitest
+      # plugin's own `skipTests` is pinned false in the pom so this does NOT
+      # silently turn the gate into a no-op.
+      #
+      # ⚠ This step deliberately does not fail the job. A failing mutation gate
+      # must still publish its log and reports — those artifacts ARE the
+      # diagnosis. `if: always()` covers a non-zero exit but NOT a step killed
+      # outright (OOM, job timeout), and this is the longest step here. So:
+      # capture the code, let the step pass, upload, then re-raise below.
+      - name: Pitest
+        id: pitest
+        run: |
+          set -o pipefail
+          # Guarantee the cache path exists: the save below runs once this step
+          # starts, and actions/cache fails a save whose path is missing.
+          mkdir -p ~/.pitest-history
+          rc=0
+          # ⚠ -Dassembly.skipAssembly: this pass does not need the 55-75 MB distribution
+          #    zip, and the assembly would rebuild it (and its exploded copy) from
+          #    scratch. No pass runs `clean`, so the bundle built by the install pass
+          #    above is still in target/ for the smoke-test and upload steps below.
+          mvn -B -P Pitest verify -DskipTests -DskipPmd -DskipSpotbugs -Dspotless.check=true \
+              -Dassembly.skipAssembly=true \
+              -Dpitest.enabled=true -Dpitest.failOnError=true \
+              -Drevision=${{ steps.ver.outputs.version }} | tee maven-pitest.log || rc=$?
+          echo "$rc" > pitest.rc
+          echo "Pitest exit code: $rc"
+
+      - name: Upload Pitest log and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pitest-reports
+          path: |
+            maven-pitest.log
+            **/target/pit-reports/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Re-raise the mutation result AFTER the upload, preserving the original
+      # semantics: a red Pitest still fails the build, only now the evidence is
+      # already published.
+      - name: Pitest gate
+        if: ${{ always() && steps.pitest.conclusion != 'skipped' }}
+        run: |
+          rc="$(cat pitest.rc 2>/dev/null || echo 1)"
+          if [ "$rc" -ne 0 ]; then
+              echo "::error::Pitest mutation gate failed (exit code $rc) — see the pitest-reports artifact."
+              exit "$rc"
+          fi
+          echo "Pitest mutation gate passed."
+
+      # ⛔ PROVE THE BUNDLE RUNS BEFORE ATTACHING IT TO A RELEASE.
+      #
+      # Before the bundle existed the release asset was the thin application jar: no
+      # Main-Class, no dependencies, `java -jar` on it simply fails — and nothing in
+      # `mvn verify` noticed, because nothing ever tried to start it. This step starts
+      # the assembled service and talks to it. It is also the regression test for the
+      # jspecify scope fix: `provided` is excluded from every runtime classpath, so a
+      # relapse kills the ApplicationContext here rather than in production.
+      #
+      # ⚠ The exploded `dir` format nests the assembly's <baseDirectory> inside
+      # <finalName>, hence the doubled path below.
+      - name: Smoke-test the distribution bundle
+        run: |
+          set -eo pipefail
+          bundle="target/cumba-oss-corej-rule-editor-rest-${{ steps.ver.outputs.version }}/cumba-oss-corej-rule-editor-rest-${{ steps.ver.outputs.version }}"
+          ls -la "$bundle"
+          bash src/test/smoke.sh "$bundle"
+
+          # ⛔ The upload below globs BOTH .jar and .zip, and `if-no-files-found: error`
+          #    fires only when NOTHING matches — so a vanished zip would ship a
+          #    jar-only release silently, which is the exact failure this bundle
+          #    exists to remove. Assert it here, where the message can say so.
+          zip="target/cumba-oss-corej-rule-editor-rest-${{ steps.ver.outputs.version }}.zip"
+          [ -f "$zip" ] || { echo "::error::$zip was not built — the release would carry only the unrunnable jar"; exit 1; }
+          ls -l "$zip"
+
+      # Hand the release assets to the release job. Short-lived hand-off -> low retention.
+      #
+      # ⚠ The glob is VERSION-SCOPED, not `*.jar`. No pass runs `clean`, so on a
+      # reused workspace target/ can still hold jars from an earlier build at a
+      # different version — a bare `*.jar` would attach those to the release
+      # alongside the real ones. Measured: a workspace that had built
+      # 0.1.0-SNAPSHOT and then 9.9.9 matched 8 jars for 4 modules.
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-archives
+          # ⚠ target/, not clients/*/target/ — single module now, and
+          #   upload-artifact only WARNS on a no-match.
+          #
+          # ⭐ BOTH extensions. The .zip is the RUNNABLE distribution and is what a
+          #   consumer actually wants; the .jar is kept because it is the same artifact
+          #   that goes to Nexus and some consumers put it on their own classpath.
+          #   Attaching only the jar is what made every release asset unrunnable.
+          path: |
+            target/*-${{ steps.ver.outputs.version }}.jar
+            target/*-${{ steps.ver.outputs.version }}.zip
+          # ⚠ if-no-files-found: error, below, because these artefacts are NOT
+          #    published to Central — the forge release is the ONLY delivery, so a
+          #    silent no-match would ship a release with no assets at all. (It cannot
+          #    catch a MISSING ZIP once both globs are listed: it fires only when
+          #    nothing matches. That is what the zip assertion in the smoke step is
+          #    for.)
+          if-no-files-found: error
+          retention-days: 2
+
+      # Purge our own freshly-built artifacts BEFORE saving, so the cache holds
+      # only third-party dependencies.
+      - name: Purge own artifacts from local repo
+        if: always()
+        run: rm -rf ~/.m2/repository/net/cumba
+
+      # ⚠ Saves are gated to `push`. A pull_request from a FORK gets read-only
+      # cache access, so a save there fails; restores still work, so fork PRs
+      # keep the warm-start benefit without erroring.
+      - name: Save Maven dependencies
+        uses: actions/cache/save@v6
+        if: ${{ always() && github.event_name == 'push' }}
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+
+      - name: Save Pitest history
+        uses: actions/cache/save@v6
+        if: ${{ always() && github.event_name == 'push' && steps.pitest.conclusion != 'skipped' }}
+        with:
+          path: ~/.pitest-history
+          key: ${{ runner.os }}-pitest-${{ github.run_id }}
+
+  #
+  # This is the PUBLIC release. The Gitea workflow cuts its own release for the
+  # same tag from the same jars, and additionally deploys to the internal Nexus.
+  # The two are independent: releases are not git refs, so nothing syncs them —
+  # each platform's workflow builds and publishes its own.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      # Overrides the workflow-level `contents: read`; creating a release writes.
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: release-archives
+          path: release-archives
+
+      # ⛔ NORMALISE THE LAYOUT — do not guess it.
+      #
+      # upload-artifact does NOT reliably collapse to the least-common-ancestor, on
+      # EITHER forge. Measured 2026-09-03 on GitHub (cumba-oss-corej-web): upload and
+      # download both SUCCEEDED and the signing step still found nothing, because the
+      # files kept their original target/ path inside the download directory.
+      #
+      # "Create GitHub Release" below uses `find` and is immune, but the signing loop
+      # is not — and both must agree on the shape. Flatten once; both can then assume it.
+      - name: Flatten downloaded assets
+        run: |
+          set -eo pipefail
+          echo "as downloaded:"
+          find release-archives -type f | sort
+          while IFS= read -r f; do
+              [ "$(dirname "$f")" = "release-archives" ] || mv -v "$f" release-archives/
+          done < <(find release-archives -type f \( -name '*.jar' -o -name '*.zip' \))
+          find release-archives -mindepth 1 -type d -empty -delete
+          echo "flattened:"
+          find release-archives -type f | sort
+
+      # ⭐ SIGN EVERY JAR — the reason is STRONGER here than on Maven Central.
+      #
+      # These artefacts are NOT published to Central, so this release is the only public
+      # delivery. A release asset CAN be replaced in place by anyone with write access,
+      # so the signature is the only thing between a consumer and a silently swapped jar.
+      # Same key as cumba-oss-corej-rules and -corej-web, so consumers have ONE trust
+      # root across the suite, not one per repository.
+      #
+      # ⚠ --batch --yes --pinentry-mode loopback: there is no tty on a runner, and
+      #    without loopback gpg tries to prompt and HANGS the job rather than failing it.
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -eo pipefail
+          # ⚠ This repository has never cut a tag, so GPG_PRIVATE_KEY has never been
+          #    exercised here. An unset secret arrives as the EMPTY STRING, and gpg then
+          #    exits 2 with "gpg: no valid OpenPGP data found" (verified 2026-09-04,
+          #    gpg 2.4.8) — which reads as a MALFORMED key and sends the next reader
+          #    after the key material rather than after an unset secret. Name it here.
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+              echo "::error::the GPG_PRIVATE_KEY secret is empty or unset in this" \
+                   "repository. Set GPG_PRIVATE_KEY and GPG_PASSPHRASE to the key" \
+                   "cumba-oss-corej-rules already signs with. Refusing to publish" \
+                   "unsigned assets." >&2
+              exit 1
+          fi
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format=long
+
+      - name: Sign release assets
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -eo pipefail
+          shopt -s nullglob
+          # ⚠ Both extensions, and the zip matters MORE than the jar: it is the
+          #   runnable artefact, so it is the one worth tampering with.
+          jars=(release-archives/*.jar)
+          zips=(release-archives/*.zip)
+          # ⚠ Each kind checked SEPARATELY. A combined "is the list empty" test passes
+          #   when the runnable zip is missing and only the jar survived — the silent
+          #   half-release this whole change exists to prevent.
+          if [ ${#jars[@]} -eq 0 ]; then
+              echo "no jar to sign — the release would be incomplete" >&2
+              exit 1
+          fi
+          if [ ${#zips[@]} -eq 0 ]; then
+              echo "no distribution zip to sign — the release would carry only the unrunnable jar" >&2
+              exit 1
+          fi
+          assets=("${jars[@]}" "${zips[@]}")
+          for f in "${assets[@]}"; do
+              gpg --batch --yes --pinentry-mode loopback \
+                  --passphrase "$GPG_PASSPHRASE" \
+                  --armor --detach-sign "$f"
+              gpg --verify "$f.asc" "$f"
+              echo "signed: $f"
+          done
+
+      # `gh` is preinstalled on GitHub-hosted runners, so this needs no
+      # third-party action — one less dependency to pin and audit in a public
+      # repo. --verify-tag refuses to invent a tag that does not exist.
+      #
+      # ⚠ GH_REPO is REQUIRED here. This job deliberately has no
+      # actions/checkout — it only needs the artifact, not the source — but
+      # `gh` resolves its target repository from the git remote in the working
+      # directory. Without a checkout and without GH_REPO it dies before making
+      # any API call:
+      #     failed to run git: fatal: not a git repository
+      # which is how the v0.0.2 release job failed. GH_REPO is the fix that
+      # keeps the checkout unnecessary.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eo pipefail
+          echo "attaching:"
+          find release-archives \( -name '*.jar' -o -name '*.zip' -o -name '*.asc' \) | sort
+          gh release create "${GITHUB_REF_NAME}" \
+              --title "Cumba OSS coreJ Rule Editor REST ${{ needs.build.outputs.version }}" \
+              --generate-notes \
+              --verify-tag \
+              $(find release-archives \( -name '*.jar' -o -name '*.zip' -o -name '*.asc' \) | sort)

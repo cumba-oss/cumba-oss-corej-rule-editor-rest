@@ -1,0 +1,2071 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        ============================================================
+        cumba-oss-corej-rule-editor-rest - the rule editor's REST service,
+        the PUBLISHED twin of cumba-corej-rule-editor-rest
+        (databrowser-meta/plans/PLAN-rule-editor.md, phase 5).
+
+        Shaped like cumba-oss-corej-rest/pom.xml: Spring Boot BOM imported
+        (no <parent>), Java 25, ${revision}, the full gate stack, AGPL,
+        the cumba-oss-* engine and no ban-oss-twins (there is nothing
+        internal to ban here). A CLIENT LEAF: built by its own CI,
+        nothing consumes it; nothing here goes to Maven Central.
+
+        Engine-free on purpose (phase 1): the engine half arrives with
+        PLAN-rule-authoring-api (phase 3). The editor does NOT bundle
+        the rule corpus - it reads it from git - so this pom declares
+        none of the corpus-bundle pins (tag, version, the two hashes, the
+        download server): check_versions.sh CHECK 4 counts exactly five
+        bundles and this is not one.
+        ============================================================
+    -->
+    <groupId>net.cumba</groupId>
+    <artifactId>cumba-oss-corej-rule-editor-rest</artifactId>
+    <packaging>jar</packaging>
+    <version>${revision}</version>
+
+    <properties>
+        <!--
+            Repo-root anchor. Every path that points at a file at the ROOT OF THIS
+            REPO resolves through ${repo.root.dir}, and never through the reactor
+            root: the reactor root is this repo only when the repo is built on its
+            own. Built from the meta repo's IDE aggregator the reactor root is the
+            META repo, and every such path then points at a file that does not
+            exist - or, worse, at an OUTPUT directory that is silently written in
+            the wrong place.
+            ${project.basedir} is the module's own directory in every context, so
+            EVERY pom in this repo declares this property relative to its own depth:
+            root = ${project.basedir}. See plans/PLAN-repo-root-anchor.md in the
+            databrowser-meta repo; check_repo_root_anchor.py enforces it.
+        -->
+        <repo.root.dir>${project.basedir}</repo.root.dir>
+
+        <java.version>25</java.version>
+        <general.encoding>UTF-8</general.encoding>
+
+        <!-- project.basedir requires 3.9.12+ -->
+        <maven.version>3.9.12</maven.version>
+        <!-- revision should be set externally; this is just a fallback -->
+        <revision>0.1.0-SNAPSHOT</revision>
+
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+
+        <project.build.sourceEncoding>${general.encoding}</project.build.sourceEncoding>
+        <project.build.reportEncoding>${general.encoding}</project.build.reportEncoding>
+
+        <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss</maven.build.timestamp.format>
+        <timestamp>${maven.build.timestamp}</timestamp>
+
+        <!--
+            Minimum line coverage enforced by the jacoco-maven-plugin check
+            execution (see <pluginManagement> below). The policy for this leaf is
+            the plan's floor (PLAN-rule-editor phase 1). Never pass
+            -Djacoco.line.coverage on the command line: read the measured value
+            from target/site/jacoco/index.html instead.
+        -->
+        <jacoco.line.coverage>0.85</jacoco.line.coverage>
+
+        <!-- failOnWarning is bound to a property so a CLI -D can flip it during lint sweeps -->
+        <maven.compiler.failOnWarning>true</maven.compiler.failOnWarning>
+
+        <sonar.projectKey>cumba-oss-corej-rule-editor-rest</sonar.projectKey>
+        <sonar.projectName>Cumba OSS coreJ Rule Editor REST</sonar.projectName>
+        <sonar.sourceEncoding>${general.encoding}</sonar.sourceEncoding>
+        <!-- The JaCoCo report Sonar reads: this module's own report - a single-artifact repo. -->
+        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+
+        <!-- exclude generated / vendored code -->
+        <sonar.exclusions>
+            **/generated/**,
+            **/target/**
+        </sonar.exclusions>
+
+        <!--
+            JaCoCo class-file patterns excluded from the coverage report. Keep in
+            lockstep with <sonar.coverage.exclusions> below.
+        -->
+        <jacoco.coverage.excludes>
+        </jacoco.coverage.excludes>
+        <sonar.coverage.exclusions>
+        </sonar.coverage.exclusions>
+
+        <!--
+            Permanent Sonar issue suppressions live in sonar-exclusions.properties
+            at the repo root, loaded by the properties-maven-plugin below.
+        -->
+
+        <!--
+            The ONE net.cumba dependency before phase 3: the cumba-bootstrap launcher
+            (cumba-commons), provided scope, for the distribution bundle. Spelled
+            dependency.cumba-oss-commons.version on purpose: check_versions.sh derives the
+            cross-repo build graph from exactly that shape. Phase 3 adds the authoring
+            API as dependency.cumba-corej.version.
+        -->
+        <dependency.cumba-oss-commons.version>0.6.0-SNAPSHOT</dependency.cumba-oss-commons.version>
+        <!--
+            Phase 3: the authoring API (cumba-corej-authoring), the scenario runner and the
+            single-run report adapter (cumba-corej-ruletest), the product's JSON report
+            (cumba-corej-report-json) and the text-faithful .cdt document
+            (cumba-datatable-provider-cdt, which ruletest already pulls in — declared
+            because CdtDocument is used directly). One implementation, two consumers: the
+            editor's verdict IS the corpus gate's (PLAN-rule-editor §3). ⚠ Never a
+            dependency.corej-rules.* / corej.rules.server here: the editor reads the corpus
+            from git (§4.2), and check_versions.sh CHECK 4 counts exactly five bundles.
+        -->
+        <dependency.cumba-oss-corej.version>0.7.0-SNAPSHOT</dependency.cumba-oss-corej.version>
+        <dependency.cumba-oss-datatable.version>0.6.0-SNAPSHOT</dependency.cumba-oss-datatable.version>
+        <!-- REST-only third-party, at cumba-corej-rest's versions. -->
+        <dependency.spring-boot.version>4.1.1</dependency.spring-boot.version>
+        <dependency.springdoc.version>3.1.1</dependency.springdoc.version>
+        <!--
+            JGit: the workspaces are clones, every git operation goes through it
+            (PLAN-rule-editor section 5.1.5, 5.2, 5.8.3). Not managed by the Boot BOM.
+        -->
+        <dependency.jgit.version>7.7.1.202607240634-r</dependency.jgit.version>
+        <dependency.junit.jupiter.version>6.1.3</dependency.junit.jupiter.version>
+
+        <!--
+            Maven Central publishing (BLUEPRINT-oss-migration Phase 04): the plugin is
+            wired by the opt-in deploy-central profile below, and this application is
+            EXCLUDED from Central there (excludeArtifacts, plugin configuration — never
+            the central.skipPublishing property, which a release job's -D overrides).
+        -->
+        <plugin.central-publishing-maven-plugin.version>0.11.0</plugin.central-publishing-maven-plugin.version>
+        <central.skipPublishing>false</central.skipPublishing>
+
+        <dependency.plexus-compiler.version>2.17.0</dependency.plexus-compiler.version>
+
+        <!-- Error Prone - consumed by the ErrPrn profile, active by default. -->
+        <dependency.error-prone.version>2.50.0</dependency.error-prone.version>
+
+        <!-- NullAway null-safety (JSpecify mode). Layers on Error Prone, so it
+             only takes effect while the ErrPrn profile is active (it is, by
+             default; -DskipErrPrn takes NullAway down with it). The NullAway
+             profile (active unless -Dnullaway.disabled) fills nullaway.extraArgs;
+             jspecify supplies the @Nullable / @NonNull / @NullMarked annotations. -->
+        <dependency.jspecify.version>1.0.1</dependency.jspecify.version>
+        <dependency.nullaway.version>0.14.1</dependency.nullaway.version>
+        <dependency.annotator-scanner.version>1.3.17</dependency.annotator-scanner.version>
+
+        <plugin.exec-maven-plugin.version>3.6.3</plugin.exec-maven-plugin.version>
+        <plugin.git-commit-id-maven-plugin.version>10.0.1</plugin.git-commit-id-maven-plugin.version>
+        <plugin.license-maven-plugin.version>2.7.1</plugin.license-maven-plugin.version>
+        <plugin.maven-compiler-plugin.version>3.16.0</plugin.maven-compiler-plugin.version>
+        <plugin.maven-dependency-plugin.version>3.11.0</plugin.maven-dependency-plugin.version>
+        <plugin.maven-assembly-plugin.version>3.8.0</plugin.maven-assembly-plugin.version>
+        <plugin.maven-jar-plugin.version>3.5.1</plugin.maven-jar-plugin.version>
+        <plugin.maven-clean-plugin.version>3.5.0</plugin.maven-clean-plugin.version>
+        <plugin.maven-install-plugin.version>3.1.4</plugin.maven-install-plugin.version>
+        <plugin.maven-deploy-plugin.version>3.1.4</plugin.maven-deploy-plugin.version>
+        <plugin.maven-source-plugin.version>3.4.0</plugin.maven-source-plugin.version>
+        <plugin.maven-javadoc-plugin.version>3.12.0</plugin.maven-javadoc-plugin.version>
+        <plugin.maven-pmd-plugin.version>3.28.0</plugin.maven-pmd-plugin.version>
+        <pmd.tool.version>7.27.0</pmd.tool.version>
+        <plugin.maven-project-info-reports-plugin.version>3.9.0</plugin.maven-project-info-reports-plugin.version>
+        <plugin.maven-resources-plugin.version>3.5.0</plugin.maven-resources-plugin.version>
+        <plugin.maven-site-plugin.version>3.22.0</plugin.maven-site-plugin.version>
+        <plugin.maven-surefire-plugin.version>3.6.0</plugin.maven-surefire-plugin.version>
+        <plugin.spotbugs-maven-plugin.version>4.10.4.1</plugin.spotbugs-maven-plugin.version>
+        <plugin.spotless-maven-plugin.version>3.10.2</plugin.spotless-maven-plugin.version>
+        <plugin.jacoco-maven-plugin.version>0.8.15</plugin.jacoco-maven-plugin.version>
+        <plugin.maven-enforcer-plugin.version>3.6.3</plugin.maven-enforcer-plugin.version>
+        <plugin.pitest-maven-plugin.version>1.30.0</plugin.pitest-maven-plugin.version>
+        <plugin.pitest-junit5-plugin.version>1.2.3</plugin.pitest-junit5-plugin.version>
+        <plugin.pitest-history.version>0.1.2</plugin.pitest-history.version>
+
+        <!--
+            === Static-analysis fail toggles ===
+            Each check is active by default and produces a report, but
+            does NOT fail the build. CI gates flip the matching
+            -Dproperty=true on the command line. Disable an individual
+            check entirely with -DskipPmd / -DskipSpotbugs.
+        -->
+
+        <!-- Extra args appended to the ErrorProne plugin arg, after the NullAway
+             args. Empty by default; set ad-hoc Error Prone flags via
+             -Derrprn.extraArgs="...". -->
+        <errprn.extraArgs></errprn.extraArgs>
+
+        <!-- NullAway args injected into the Error Prone -Xplugin line. Empty by
+             default; the NullAway profile (active unless -Dnullaway.disabled)
+             fills this with the JSpecify-mode ERROR config. -->
+        <nullaway.extraArgs></nullaway.extraArgs>
+
+        <!-- Whether the ErrPrn profile (active by default) breaks the
+             build on findings. Default true; relax locally with
+             `-Derrprn.failOnWarning=false`. -->
+        <errprn.failOnWarning>true</errprn.failOnWarning>
+
+        <!-- Whether the PMD profile (active by default) breaks the
+             build on findings. CI flips with `-Dpmd.failOnViolation=true`.
+             Skip the profile entirely with `-DskipPmd`. -->
+        <pmd.failOnViolation>false</pmd.failOnViolation>
+
+        <!-- Whether the SpotBugs profile (active by default) breaks
+             the build on findings. CI flips with
+             `-Dspotbugs.failOnError=true`. Skip entirely with
+             `-DskipSpotbugs`. -->
+        <spotbugs.failOnError>false</spotbugs.failOnError>
+
+        <!--
+            Spotless mode. Default: apply (formats sources in place on
+            every build). CI gates flip with `-Dspotless.check=true` -
+            that swaps the bound goal from `apply` to `check`, which
+            fails the build if any source isn't already formatted to
+            the project style.
+
+            Implemented via the spotless.apply.phase / spotless.check.phase
+            pair below; the `spotless-check-mode` profile (further down)
+            flips both phases when spotless.check=true.
+        -->
+        <spotless.check>false</spotless.check>
+        <spotless.apply.phase>process-sources</spotless.apply.phase>
+        <spotless.check.phase>none</spotless.check.phase>
+
+        <!--
+            Pitest mutation testing thresholds. Two-tier, as in every repo of the
+            stack: `pitest.<x>.target` is the module's GOAL (integer percentages),
+            `pitest.<x>.threshold` the EFFECTIVE value fed to the plugin, 0 unless
+            the `pitest-fail-on-error` profile (-Dpitest.failOnError=true) copies
+            the target onto it. Do not pass -Dpitest.mutation.threshold on the
+            command line.
+        -->
+        <pitest.mutation.threshold>0</pitest.mutation.threshold>
+        <pitest.coverage.threshold>0</pitest.coverage.threshold>
+        <pitest.test.strength.threshold>0</pitest.test.strength.threshold>
+
+        <pitest.mutation.target>55</pitest.mutation.target>
+        <pitest.coverage.target>80</pitest.coverage.target>
+        <pitest.test.strength.target>0</pitest.test.strength.target>
+
+        <pitest.failOnError>false</pitest.failOnError>
+
+        <!--
+            Pitest exclusion properties, consumed by <excludedTestClasses> /
+            <excludedClasses> in the Pitest profile below. Empty here so they
+            always resolve.
+        -->
+        <pitest.excludedTestClasses/>
+        <pitest.excludedClasses/>
+
+        <!--
+            Deploy coordinates for the `deploy-nexus` profile below.
+
+            INTENTIONALLY EMPTY. No repository hostname is baked into this repo -
+            the URLs are supplied by CI from Gitea variables (MAVEN_RELEASE_URL /
+            MAVEN_SNAPSHOT_URL), or on the command line for a manual deploy:
+
+              mvn -P deploy-nexus deploy \
+                  -Ddeploy.releaseUrl=https://<host>/repository/maven-releases/ \
+                  -Ddeploy.snapshotUrl=https://<host>/repository/maven-snapshots/
+
+            Keeping the URLs empty means a `deploy` that forgot them fails loudly
+            instead of silently targeting the wrong host - see the
+            `enforce-deploy-urls` rule in the profile. Do NOT set snapshotUrl to
+            the release URL to silence it.
+        -->
+        <deploy.serverId>nexus-deploy</deploy.serverId>
+        <deploy.releaseUrl/>
+        <deploy.snapshotUrl/>
+    </properties>
+
+    <profiles>
+
+        <!--                                                                  -->
+        <!-- Opt-in: extra Eclipse ECJ pass on top of the regular javac       -->
+        <!-- compile, run as a second compile bound to the verify phase.     -->
+        <!-- Activate with `-P ecj`.                                        -->
+        <!--                                                                  -->
+        <profile>
+            <id>ecj</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-compiler-plugin</artifactId>
+                            <executions>
+                                <execution>
+                                    <id>ecj-check</id>
+                                    <phase>verify</phase>
+                                    <goals><goal>compile</goal></goals>
+                                    <configuration>
+                                        <compilerId>eclipse</compilerId>
+                                        <failOnWarning>true</failOnWarning>
+                                        <showWarnings>true</showWarnings>
+                                        <outputDirectory>${project.build.directory}/ecj-check-classes</outputDirectory>
+                                        <useIncrementalCompilation>false</useIncrementalCompilation>
+                                        <!--
+                                            Reset compilerArgs: ECJ rejects javac-specific flags
+                                            (-Xlint:all, -Xmaxwarns/errs) that the base build sets
+                                            for the default-compile execution. <failOnWarning> above
+                                            is the ECJ-side equivalent.
+
+                                            -warn:-warningToken silences ECJ's complaint about
+                                            @SuppressWarnings tokens it doesn't recognise (e.g.
+                                            javac's "this-escape", added in JDK 21 but unknown
+                                            to ECJ).
+                                        -->
+                                        <compilerArgs combine.self="override">
+                                            <arg>-warn:-warningToken</arg>
+                                        </compilerArgs>
+                                    </configuration>
+                                </execution>
+                            </executions>
+                            <dependencies>
+                                <dependency>
+                                    <groupId>org.codehaus.plexus</groupId>
+                                    <artifactId>plexus-compiler-eclipse</artifactId>
+                                    <version>${dependency.plexus-compiler.version}</version>
+                                </dependency>
+                            </dependencies>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+
+        <!--                                                                  -->
+        <!-- PMD static analysis. Active by default (via property-based       -->
+        <!-- activation) so `mvn verify` always runs PMD and writes the       -->
+        <!-- per-module report to target/pmd.xml. failOnViolation is driven   -->
+        <!-- by the `pmd.failOnViolation` property (default false): routine   -->
+        <!-- local builds get the report without being blocked; CI gates can  -->
+        <!-- flip with `-Dpmd.failOnViolation=true`. Skip the profile         -->
+        <!-- entirely with `-DskipPmd`.                                       -->
+        <!--                                                                  -->
+        <!-- targetJdk / language version are auto-detected from              -->
+        <!-- maven.compiler.release. The ruleset lives at pmd-ruleset.xml     -->
+        <!-- at the repo root.                                                -->
+        <!--                                                                  -->
+        <profile>
+            <id>PMD</id>
+            <activation>
+                <!--
+                    Property-based activation (not activeByDefault) so the
+                    profile survives an explicit `-P <other>` selection, which
+                    deactivates activeByDefault profiles but not property-based
+                    ones. Disable with
+                    `-DskipPmd` (or any value, e.g. `-DskipPmd=true`).
+                -->
+                <property>
+                    <name>!skipPmd</name>
+                </property>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-pmd-plugin</artifactId>
+                            <version>${plugin.maven-pmd-plugin.version}</version>
+                            <!-- Run a newer PMD engine than the one bundled with
+                                 the plugin (see pmd.tool.version). All four PMD
+                                 modules are pinned in lockstep to avoid a split
+                                 between pmd-core and the language modules. -->
+                            <dependencies>
+                                <dependency>
+                                    <groupId>net.sourceforge.pmd</groupId>
+                                    <artifactId>pmd-core</artifactId>
+                                    <version>${pmd.tool.version}</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>net.sourceforge.pmd</groupId>
+                                    <artifactId>pmd-java</artifactId>
+                                    <version>${pmd.tool.version}</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>net.sourceforge.pmd</groupId>
+                                    <artifactId>pmd-javascript</artifactId>
+                                    <version>${pmd.tool.version}</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>net.sourceforge.pmd</groupId>
+                                    <artifactId>pmd-jsp</artifactId>
+                                    <version>${pmd.tool.version}</version>
+                                </dependency>
+                            </dependencies>
+                            <configuration>
+                                <failOnViolation>${pmd.failOnViolation}</failOnViolation>
+                                <printFailingErrors>true</printFailingErrors>
+                                <!-- Analyse src/test/java too: a malformed test passes while checking nothing. -->
+                                <includeTests>true</includeTests>
+                                <!-- A file PMD cannot parse must fail the build, not vanish with a WARNING. -->
+                                <skipPmdError>false</skipPmdError>
+                                <linkXRef>false</linkXRef>
+                                <rulesets>
+                                    <ruleset>${repo.root.dir}/pmd-ruleset.xml</ruleset>
+                                </rulesets>
+                            </configuration>
+                            <executions>
+                                <execution>
+                                    <id>pmd-check</id>
+                                    <phase>verify</phase>
+                                    <goals><goal>check</goal></goals>
+                                </execution>
+                            </executions>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-pmd-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--                                                                   -->
+        <!-- Google Error Prone, run as a javac plugin attached to the regular -->
+        <!-- default-compile execution. Active by default (via property-based  -->
+        <!-- activation), matching the PMD/SpotBugs idiom above: the gate is a  -->
+        <!-- gate, not an opt-in lint sweep. errprn.failOnWarning defaults to   -->
+        <!-- true, so a warning breaks the build. Skip the profile entirely     -->
+        <!-- with `-DskipErrPrn`.                                              -->
+        <!--                                                                   -->
+        <profile>
+            <id>ErrPrn</id>
+            <activation>
+                <!--
+                    Property-based activation (not activeByDefault) so the
+                    profile survives an explicit `-P <other>` selection, which
+                    deactivates activeByDefault profiles but not property-based
+                    ones. Disable with
+                    `-DskipErrPrn` (or any value, e.g. `-DskipErrPrn=true`).
+                -->
+                <property>
+                    <name>!skipErrPrn</name>
+                </property>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-compiler-plugin</artifactId>
+                            <configuration>
+                                <fork>true</fork>
+                                <failOnWarning>${errprn.failOnWarning}</failOnWarning>
+                                <showWarnings>true</showWarnings>
+                                <compilerArgs combine.children="append">
+                                    <arg>-XDcompilePolicy=simple</arg>
+                                    <arg>--should-stop=ifError=FLOW</arg>
+                                    <!-- ${nullaway.extraArgs} carries the NullAway config (set by
+                                         the NullAway profile, active unless -Dnullaway.disabled).
+                                         ${errprn.extraArgs} is empty by default; set ad-hoc Error
+                                         Prone flags via -Derrprn.extraArgs="…". -->
+                                    <!-- ⚠ StringConcatToTextBlock is OFF because Error Prone 2.50.0 CRASHES
+                                         on it: java.util.NoSuchElementException from
+                                         Iterables.getLast in StringConcatToTextBlock.matchLiteral,
+                                         measured 2026-09-07 on 7 files across the stack. It is an
+                                         upstream defect, not a finding we can fix in our code:
+                                         the check aborts the compile before it can report anything.
+                                         Re-enable by appending -Xep:StringConcatToTextBlock:WARN
+                                         via -Derrprn.extraArgs once upstream fixes it.
+
+                                         ReferenceEquality and UnrecognisedJavadocTag are OFF
+                                         because in THIS codebase they are ~100% false positives.
+                                         Measured 2026-09-07 over all 17 repos, 326 findings total:
+
+                                           * ReferenceEquality, 90 sites. 65 are in the Swing app
+                                             (src == cbxRestart, c == editor): event-source and
+                                             component identity, where == is the correct idiom and
+                                             .equals() would be wrong. The rest are ownership
+                                             identity (aRef.getManager() == this,
+                                             fileSystem == other.fileSystem). Zero real defects.
+                                           * UnrecognisedJavadocTag, 233 sites over 76 files. 172
+                                             land directly on the ANNOTATION line following a
+                                             javadoc block (@JsonProperty x47, @Getter x44,
+                                             @Nullable x27, @Setter x10, @Builder x7): the parser
+                                             reads the annotation as a javadoc tag. No javadoc in
+                                             the tree is actually malformed.
+
+                                         Suppressing 323 sites would have buried the signal rather
+                                         than kept it, so the two checks are off and Error Prone's
+                                         remaining checks stay live and gating. Re-check both when
+                                         Error Prone is next bumped. -->
+                                    <arg>-Xplugin:ErrorProne -Xep:StringConcatToTextBlock:OFF -Xep:ReferenceEquality:OFF -Xep:UnrecognisedJavadocTag:OFF ${nullaway.extraArgs} ${errprn.extraArgs}</arg>
+
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</arg>
+                                    <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</arg>
+                                    <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
+                                    <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
+                                </compilerArgs>
+                                <annotationProcessorPaths combine.children="append">
+                                    <path>
+                                        <groupId>com.google.errorprone</groupId>
+                                        <artifactId>error_prone_core</artifactId>
+                                        <version>${dependency.error-prone.version}</version>
+                                    </path>
+                                </annotationProcessorPaths>
+                            </configuration>
+
+                            <!--
+                                NullAway runs on MAIN sources only.
+
+                                AnnotatedPackages=net.cumba matches test packages too, and test
+                                code exists partly to pass null across API boundaries and to
+                                dereference things a caller never would. Measured 2026-09-07 over
+                                all 17 repos: 712 NullAway errors, 712 of them under src/test and
+                                ZERO under src/main. The production null contract is already
+                                fully satisfied, so excluding tests costs no coverage of it.
+
+                                Implemented by overriding default-testCompile's compilerArgs with
+                                combine.self="override" so the plugin-level list (which carries
+                                ${nullaway.extraArgs}) is replaced rather than appended to. Error
+                                Prone itself stays ON for tests; only NullAway is dropped.
+
+                                ⚠ Dropping ${nullaway.extraArgs} is NOT enough on its own. NullAway
+                                stays on the annotationProcessorPath, so Error Prone still tries to
+                                instantiate it and dies with "NullAway configuration is incorrect.
+                                Must either specify annotated packages ... or pass OnlyNullMarked".
+                                -Xep:NullAway:OFF is what actually stops it being constructed.
+                            -->
+                            <executions>
+                                <execution>
+                                    <id>default-testCompile</id>
+                                    <configuration>
+                                        <compilerArgs combine.self="override">
+                                            <arg>-XDcompilePolicy=simple</arg>
+                                            <arg>--should-stop=ifError=FLOW</arg>
+                                            <arg>-Xplugin:ErrorProne -Xep:NullAway:OFF -Xep:StringConcatToTextBlock:OFF -Xep:ReferenceEquality:OFF -Xep:UnrecognisedJavadocTag:OFF ${errprn.extraArgs}</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</arg>
+                                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</arg>
+                                            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
+                                            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
+                                        </compilerArgs>
+                                    </configuration>
+                                </execution>
+                            </executions>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+
+        <!--                                                                  -->
+        <!-- SpotBugs static analysis. Active by default (via property-based  -->
+        <!-- activation) so `mvn verify` always runs SpotBugs and writes the  -->
+        <!-- per-module XML / HTML report to target/site/. failOnError is     -->
+        <!-- driven by the `spotbugs.failOnError` property (default false):   -->
+        <!-- routine local builds get the report without being blocked; CI    -->
+        <!-- gates flip with `-Dspotbugs.failOnError=true`. Skip entirely     -->
+        <!-- with `-DskipSpotbugs`. Per-module exclude filters are layered by -->
+        <!-- the auto-activated `spotbugs-module-ignore` profile (below) when -->
+        <!-- a module ships a `spotbugs_ignore.xml`.                          -->
+        <!--                                                                  -->
+        <profile>
+            <id>SpotBugs</id>
+            <activation>
+                <!--
+                    Property-based activation (not activeByDefault) so the
+                    profile survives an explicit `-P <other>` selection, which
+                    deactivates activeByDefault profiles but not property-based
+                    ones. Disable with
+                    `-DskipSpotbugs`.
+                -->
+                <property>
+                    <name>!skipSpotbugs</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--                                                                   -->
+        <!-- Pitest mutation testing. OPT-IN: does not run on a plain          -->
+        <!-- `mvn verify`. Enable either by activating the profile by name     -->
+        <!-- (`-P Pitest`) or by setting `-Dpitest.enabled=true`. Both paths   -->
+        <!-- produce the per-module HTML/XML report under                      -->
+        <!-- `<module>/target/pit-reports/`. Runs are INCREMENTAL, not cold:   -->
+        <!-- the OSS pitest-history plugin reuses                              -->
+        <!-- `~/.pitest-history/<artifactId>/history.bin`, which `mvn clean`   -->
+        <!-- does not remove (see the <configuration> comment below). Delete   -->
+        <!-- that file to measure a module cold.                               -->
+        <!--                                                                   -->
+        <!-- Thresholds default to 0 (no gate); the `pitest-fail-on-error`     -->
+        <!-- profile below activates real enforcement when the CI gate sets   -->
+        <!-- `-Dpitest.failOnError=true` (combine with `-P Pitest` or          -->
+        <!-- `-Dpitest.enabled=true` so the analysis actually runs).           -->
+        <!--                                                                   -->
+        <profile>
+            <id>Pitest</id>
+            <activation>
+                <!--
+                    Property-based opt-in. The profile activates when
+                    `-Dpitest.enabled=true` (or any value) is set. Maven also
+                    activates any profile when invoked as `-P Pitest`,
+                    regardless of <activation>, so both paths work and the
+                    profile stays dormant on a plain `mvn verify`.
+                -->
+                <property>
+                    <name>pitest.enabled</name>
+                </property>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.pitest</groupId>
+                            <artifactId>pitest-maven</artifactId>
+                            <version>${plugin.pitest-maven-plugin.version}</version>
+                            <dependencies>
+                                <!--
+                                    JUnit 5 / Jupiter support; without this pitest's
+                                    default JUnit 4 driver finds zero tests.
+                                -->
+                                <dependency>
+                                    <groupId>org.pitest</groupId>
+                                    <artifactId>pitest-junit5-plugin</artifactId>
+                                    <version>${plugin.pitest-junit5-plugin.version}</version>
+                                </dependency>
+                                <!--
+                                    OSS incremental-history SPI. pitest 1.17+ removed
+                                    its built-in history reader/writer (now part of the
+                                    commercial `com.arcmutate:base` subscription); this
+                                    plugin registers a `HistoryFactory` SPI that fills
+                                    the gap. With it on the classpath, the per-module
+                                    `historyInputFile` / `historyOutputFile` settings
+                                    below take effect and pitest logs "Found plugin :
+                                    Default history" plus "Incremental analysis reduced
+                                    number of mutations by N" each run.
+                                -->
+                                <dependency>
+                                    <groupId>io.github.mibimiflo</groupId>
+                                    <artifactId>pitest-history</artifactId>
+                                    <version>${plugin.pitest-history.version}</version>
+                                </dependency>
+                            </dependencies>
+                            <configuration>
+                                <!--
+                                    Incremental-analysis history file. Anchored to
+                                    `${user.home}/.pitest-history/<artifactId>/history.bin`
+                                    so the file lives OUTSIDE any module's `target/`
+                                    — `mvn clean` therefore does not wipe it, and
+                                    warm-cache CI runs can reuse it.
+
+                                    ⚠ HOME, not the repo root. `actions/checkout` runs
+                                    `git clean -ffdx` when it finds an existing repo in
+                                    the workspace, and `-x` deletes IGNORED files too, so
+                                    a gitignored repo-root `.pitest-history/` is NOT safe
+                                    from it on a reused runner workspace. A home-dir path
+                                    also lets both cache steps name a plain DIRECTORY
+                                    instead of a `**` glob — actions/cache hard-fails a
+                                    save whose path pattern matches nothing, which an
+                                    aborted mutation run can produce.
+
+                                    CI caches `~/.pitest-history` between runs (see
+                                    `.gitea/workflows/main.yml`).
+                                -->
+                                <historyInputFile>${user.home}/.pitest-history/${project.artifactId}/history.bin</historyInputFile>
+                                <historyOutputFile>${user.home}/.pitest-history/${project.artifactId}/history.bin</historyOutputFile>
+                                <!--
+                                    ⚠ Do NOT remove. pitest-maven's `skipTests`
+                                    binds to `${skipTests}` by default, so CI's
+                                    dedicated mutation pass — which passes
+                                    `-DskipTests` to suppress the redundant Surefire
+                                    re-run (pitest forks its own test JVMs) — would
+                                    otherwise skip mutationCoverage entirely and turn
+                                    the gate into a silent no-op. See the "Pitest" step
+                                    in `.gitea/workflows/main.yml`.
+                                -->
+                                <!--
+                                    ⚠ Wiring for the per-module pitest exclusion
+                                    properties. WITHOUT this they are INERT: a module can
+                                    declare them, believe it has narrowed the mutation
+                                    set, and pitest still mutates everything and still
+                                    runs every test.
+
+                                    Measured 2026-09-03 in cumba-core-engine, where both
+                                    were unwired: net.cumba.cdisc.core.ruletest reported
+                                    line coverage 56% (1187/2102) and FAILED its gate;
+                                    with <excludedClasses> honoured the same 1187 covered
+                                    lines became 95% (1187/1253) and it passed — the
+                                    untested corpus-maintenance CLIs the author had
+                                    already excluded were inflating the denominator.
+                                    net.cumba.cdisc.core meanwhile spent 97 minutes
+                                    without finishing because an excluded concurrency test
+                                    kept running under every mutation.
+
+                                    Both empty by default, which pitest reads as
+                                    "exclude nothing".
+                                -->
+                                <excludedTestClasses>${pitest.excludedTestClasses}</excludedTestClasses>
+                                <excludedClasses>${pitest.excludedClasses}</excludedClasses>
+                                <skipTests>false</skipTests>
+                                <outputFormats>
+                                    <outputFormat>HTML</outputFormat>
+                                    <outputFormat>XML</outputFormat>
+                                </outputFormats>
+                                <!-- Stable report dir name (no timestamp suffix) so
+                                     the latest report is always at the same path. -->
+                                <timestampedReports>false</timestampedReports>
+                                <!-- UI/render-only modules ship zero analysable classes;
+                                     don't fail the build for those. -->
+                                <failWhenNoMutations>false</failWhenNoMutations>
+                                <!--
+                                    Incremental analysis (history files) is enabled via
+                                    the OSS `io.github.mibimiflo:pitest-history` plugin
+                                    declared in <dependencies> above. It registers a
+                                    `HistoryFactory` SPI that replaces the OSS history
+                                    reader/writer removed in pitest 1.17+ (which would
+                                    otherwise require the commercial `com.arcmutate:base`
+                                    subscription).
+
+                                    With history wired up, the per-module
+                                    `historyInputFile` / `historyOutputFile` settings
+                                    above read and write
+                                    `${user.home}/.pitest-history/${project.artifactId}/history.bin`
+                                    — outside any module's `target/` AND outside the
+                                    repo, so neither `mvn clean` nor `actions/checkout`'s
+                                    `git clean -ffdx` wipes it. pitest logs
+                                    "Found plugin : Default history" and "Incremental
+                                    analysis reduced number of mutations by N" each
+                                    run. CI caches `~/.pitest-history`
+                                    between runs to keep the warm-cache benefit (see
+                                    `.gitea/workflows/main.yml`).
+                                -->
+                                <!-- Threshold gates. Default-effective values are 0
+                                     (no gate) so local builds don't fail; the
+                                     `pitest-fail-on-error` profile flips the effective
+                                     property to the per-module .target when
+                                     -Dpitest.failOnError=true is set by CI. -->
+                                <mutationThreshold>${pitest.mutation.threshold}</mutationThreshold>
+                                <coverageThreshold>${pitest.coverage.threshold}</coverageThreshold>
+                                <testStrengthThreshold>${pitest.test.strength.threshold}</testStrengthThreshold>
+                                <!--
+                                    Mirror Surefire's projectBasedir / repoRoot system
+                                    properties into the pitest minion JVMs. Pitest forks
+                                    its own JVMs separately from Surefire and does NOT
+                                    inherit Surefire's <systemPropertyVariables>, so
+                                    without these any test that reads
+                                    System.getProperty("projectBasedir") or "repoRoot"
+                                    would see null under `mvn -P Pitest`.
+                                -->
+                                <jvmArgs>
+                                    <jvmArg>-DprojectBasedir=${project.basedir}</jvmArg>
+                                    <jvmArg>-Duser.home=${project.build.directory}/test-home</jvmArg>
+                                    <jvmArg>-DrealUserHome=${user.home}</jvmArg>
+                                    <jvmArg>-DrepoRoot=${repo.root.dir}</jvmArg>
+                                    <!-- The pitest minions do not inherit Surefire's <systemPropertyVariables>
+                                         (same reason as the two args above), so the JUL format has to be
+                                         repeated here. Keep it byte-identical to the Surefire value and
+                                         SPACE-FREE: pitest splits each jvmArg on whitespace, so a spaced
+                                         pattern arrives as several arguments and the minion dies with
+                                         MINION_DIED, "Could not find or load main class %2$s". A plain
+                                         `mvn test` stays green in that state; only `-P Pitest` reds. -->
+                                    <jvmArg>-Djava.util.logging.SimpleFormatter.format=[%4$-7s]%2$s:%5$s%n</jvmArg>
+                                    <!-- The same test-scope JUL config Surefire loads. Minions inherit none
+                                         of Surefire's <systemPropertyVariables>, so it is repeated here.
+                                         MUST stay SPACE-FREE: pitest splits each jvmArg on whitespace. -->
+                                    <jvmArg>-Djava.util.logging.config.file=${repo.root.dir}/logging-test.properties</jvmArg>
+                                </jvmArgs>
+                            </configuration>
+                            <executions>
+                                <execution>
+                                    <id>pitest-mutation-coverage</id>
+                                    <phase>verify</phase>
+                                    <goals><goal>mutationCoverage</goal></goals>
+                                </execution>
+                            </executions>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--                                                                   -->
+        <!-- Sub-profile that promotes per-module pitest.*.target values to    -->
+        <!-- the effective pitest.*.threshold properties when                  -->
+        <!-- `-Dpitest.failOnError=true` is set. CI gates flip this to enforce -->
+        <!-- mutation/coverage thresholds; local builds leave the effective    -->
+        <!-- values at 0 (no gate). Same trick as the `spotless-check-mode`    -->
+        <!-- profile uses for spotless.apply.phase / spotless.check.phase.     -->
+        <!--                                                                   -->
+        <profile>
+            <id>pitest-fail-on-error</id>
+            <activation>
+                <property>
+                    <name>pitest.failOnError</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <pitest.mutation.threshold>${pitest.mutation.target}</pitest.mutation.threshold>
+                <pitest.coverage.threshold>${pitest.coverage.target}</pitest.coverage.threshold>
+                <pitest.test.strength.threshold>${pitest.test.strength.target}</pitest.test.strength.threshold>
+            </properties>
+        </profile>
+
+        <!--                                                         -->
+        <!-- Auto-activated when the current module ships a          -->
+        <!-- spotbugs_ignore.xml file. Wires that file in as the     -->
+        <!-- SpotBugs exclude filter. Modules without the file       -->
+        <!-- simply run SpotBugs with no exclusions.                 -->
+        <!--                                                         -->
+        <profile>
+            <id>spotbugs-module-ignore</id>
+            <activation>
+                <file>
+                    <exists>${project.basedir}/spotbugs_ignore.xml</exists>
+                </file>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>com.github.spotbugs</groupId>
+                            <artifactId>spotbugs-maven-plugin</artifactId>
+                            <configuration>
+                                <!-- Project-wide filter PLUS the module's own filter, comma-separated. -->
+                                <excludeFilterFile>${repo.root.dir}/spotbugs_project_filter.xml,${project.basedir}/spotbugs_ignore.xml</excludeFilterFile>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+
+        <!--                                                                  -->
+        <!-- Spotless check mode. Auto-activated when the build is invoked    -->
+        <!-- with `-Dspotless.check=true`. Swaps the spotless-apply execution -->
+        <!-- to `phase=none` and binds spotless-check to `process-sources`,   -->
+        <!-- which fails the build if any source is not already formatted to  -->
+        <!-- the project style. Use this from CI:                             -->
+        <!--   mvn -Dspotless.check=true -DskipTests verify                   -->
+        <!--                                                                  -->
+        <profile>
+            <id>spotless-check-mode</id>
+            <activation>
+                <property>
+                    <name>spotless.check</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <spotless.apply.phase>none</spotless.apply.phase>
+                <spotless.check.phase>process-sources</spotless.check.phase>
+            </properties>
+        </profile>
+
+        <!--                                                                   -->
+        <!-- NullAway: null-safety check that layers on Error Prone (ErrPrn).  -->
+        <!-- Active by default (deactivate with -Dnullaway.disabled). It sets  -->
+        <!-- nullaway.extraArgs (injected into the Error Prone -Xplugin line)  -->
+        <!-- and adds the NullAway processor to the compiler path. Because it  -->
+        <!-- layers on Error Prone, it only has an effect while the ErrPrn     -->
+        <!-- profile is active — which is by default, unless -DskipErrPrn.      -->
+        <!--                                                                   -->
+        <!-- JSpecifyMode + AnnotatedPackages=net.cumba: every package under -->
+        <!-- the project group is null-checked. ERROR severity for unambiguous -->
+        <!-- gating; AcknowledgeRestrictiveAnnotations honours existing        -->
+        <!-- @lombok.NonNull annotations.                                      -->
+        <!--                                                                   -->
+        <profile>
+            <id>NullAway</id>
+            <activation>
+                <property>
+                    <name>!nullaway.disabled</name>
+                </property>
+            </activation>
+            <properties>
+                <nullaway.extraArgs>-Xep:NullAway:ERROR -XepOpt:NullAway:JSpecifyMode=true -XepOpt:NullAway:AnnotatedPackages=net.cumba -XepOpt:NullAway:AcknowledgeRestrictiveAnnotations=true</nullaway.extraArgs>
+            </properties>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-compiler-plugin</artifactId>
+                            <configuration>
+                                <annotationProcessorPaths combine.children="append">
+                                    <path>
+                                        <groupId>com.uber.nullaway</groupId>
+                                        <artifactId>nullaway</artifactId>
+                                        <version>${dependency.nullaway.version}</version>
+                                    </path>
+                                </annotationProcessorPaths>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+
+        <!--                                                                  -->
+        <!-- NullAwayAnnotator support — OPT-IN, never active by default.      -->
+        <!-- Activate with -Dnullaway.annotator. Adds the AnnotatorScanner     -->
+        <!-- processor and the NullAway/scanner serialization flags so the     -->
+        <!-- annotator-core driver can read serialized fixes/errors and infer  -->
+        <!-- @Nullable placements. Declared AFTER the NullAway profile so this -->
+        <!-- profile's nullaway.extraArgs override wins when both are active.  -->
+        <!-- NullAway is demoted to WARN here so the compile COMPLETES and the -->
+        <!-- serialized metadata is written; run with                         -->
+        <!-- -Dmaven.compiler.failOnWarning=false. The two ${annotator.*.config}-->
+        <!-- paths are supplied per run via -Dannotator.nullaway.config /      -->
+        <!-- -Dannotator.scanner.config. Normal / CI builds never see this.    -->
+        <!--                                                                  -->
+        <profile>
+            <id>NullAwayAnnotator</id>
+            <activation>
+                <property>
+                    <name>nullaway.annotator</name>
+                </property>
+            </activation>
+            <properties>
+                <nullaway.extraArgs>-Xep:NullAway:WARN -XepOpt:NullAway:JSpecifyMode=true -XepOpt:NullAway:OnlyNullMarked=true -XepOpt:NullAway:AcknowledgeRestrictiveAnnotations=true -XepOpt:NullAway:SerializeFixMetadata=true -XepOpt:NullAway:FixSerializationConfigPath=${annotator.nullaway.config} -XepOpt:AnnotatorScanner:ConfigPath=${annotator.scanner.config}</nullaway.extraArgs>
+            </properties>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-compiler-plugin</artifactId>
+                            <configuration>
+                                <annotationProcessorPaths combine.children="append">
+                                    <path>
+                                        <groupId>edu.ucr.cs.riple.annotator</groupId>
+                                        <artifactId>annotator-scanner</artifactId>
+                                        <version>${dependency.annotator-scanner.version}</version>
+                                    </path>
+                                </annotationProcessorPaths>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+        <!--                                                                  -->
+        <!-- Publish to the internal Nexus. OPT-IN via `-P deploy-nexus`,    -->
+        <!-- because <distributionManagement> lives here rather than at top   -->
+        <!-- level: a plain `mvn deploy` then has no target and fails loudly  -->
+        <!-- instead of guessing one.                                         -->
+        <!--                                                                  -->
+        <!-- The URLs come from ${deploy.releaseUrl} / ${deploy.snapshotUrl}, -->
+        <!-- both EMPTY by default (see <properties>), and the credentials    -->
+        <!-- from the <server> whose id matches ${deploy.serverId}.           -->
+        <!--                                                                  -->
+        <!-- This project is PROPRIETARY and is never published to Maven      -->
+        <!-- Central; there is deliberately no `deploy-central` counterpart,  -->
+        <!-- no central-publishing-maven-plugin and no gpg signing.           -->
+        <!--                                                                  -->
+        <profile>
+            <id>deploy-nexus</id>
+            <build>
+                <plugins>
+                    <!--
+                        Fail-closed guard on the deploy URLs.
+
+                        ⚠ WHY THIS EXISTS. An EMPTY <snapshotRepository><url/>
+                        does not make Maven refuse a snapshot deploy — it falls
+                        back to <repository> and uploads the snapshot into the
+                        RELEASE repository, with BUILD SUCCESS and no warning.
+                        On a real Nexus that either trips the release repo's
+                        "disable redeploy" policy or, worse, silently pollutes
+                        it with transient artifacts its cleanup policy will
+                        never rotate out.
+
+                        Since the URLs default to empty on purpose (no hostname
+                        in this repo), that fallback is one forgotten -D away.
+                        The rule below turns it into a named failure at
+                        `validate`, before anything is built or uploaded, from
+                        EVERY entry point — not just the CI step, which has its
+                        own guard. The regex requires a scheme, so it also
+                        catches a bare `nexus.example.com` typo.
+                    -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>enforce-deploy-urls</id>
+                                <phase>validate</phase>
+                                <goals><goal>enforce</goal></goals>
+                                <configuration>
+                                    <rules>
+                                        <requireProperty>
+                                            <property>deploy.releaseUrl</property>
+                                            <!-- Fires only if the property is UNDEFINED; while <properties>
+                                                 declares it (empty), the regexMessage below is what users see. -->
+                                            <message>deploy.releaseUrl is not set. Pass -Ddeploy.releaseUrl=&lt;url&gt; (CI supplies it from the MAVEN_RELEASE_URL Gitea variable).</message>
+                                            <regex>^\w+://\S+$</regex>
+                                            <regexMessage>deploy.releaseUrl is empty or malformed. It must be an absolute URL including scheme, e.g. https://host/repository/maven-releases/ — CI supplies it from the MAVEN_RELEASE_URL Gitea variable; pass -Ddeploy.releaseUrl=&lt;url&gt; for a manual deploy.</regexMessage>
+                                        </requireProperty>
+                                        <requireProperty>
+                                            <property>deploy.snapshotUrl</property>
+                                            <message>deploy.snapshotUrl is not set. Pass -Ddeploy.snapshotUrl=&lt;url&gt; (CI supplies it from the MAVEN_SNAPSHOT_URL Gitea variable). It must NOT be left empty or pointed at the release repository: an empty value makes Maven deploy snapshots INTO the release repo.</message>
+                                            <regex>^\w+://\S+$</regex>
+                                            <regexMessage>deploy.snapshotUrl is empty or malformed. It must be an absolute URL including scheme, e.g. https://host/repository/maven-snapshots/ — CI supplies it from the MAVEN_SNAPSHOT_URL Gitea variable. Do NOT point it at the release repository to silence this: an empty or release-pointing value makes Maven deploy snapshots into the release repo.</regexMessage>
+                                        </requireProperty>
+                                    </rules>
+                                    <fail>true</fail>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!--
+                        Sources jar. Attached on the deploy path only — it costs
+                        nothing locally to omit, and downstream repos consuming
+                        net.cumba.* from Nexus get working IDE navigation into
+                        this code instead of decompiled class files.
+
+                        jar-no-fork, so it attaches to the running lifecycle
+                        rather than forking a second `generate-sources` pass.
+                    -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${plugin.maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!--
+                        Javadoc jar, same rationale as the sources jar above.
+                        The javadoc GATE (see <build><plugins>) already runs on
+                        every build and would have failed long before here, so
+                        this execution only packages what is known to be clean.
+                    -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${plugin.maven-javadoc-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+            <distributionManagement>
+                <repository>
+                    <id>${deploy.serverId}</id>
+                    <name>Releases</name>
+                    <url>${deploy.releaseUrl}</url>
+                </repository>
+                <snapshotRepository>
+                    <id>${deploy.serverId}</id>
+                    <name>Snapshots</name>
+                    <url>${deploy.snapshotUrl}</url>
+                </snapshotRepository>
+            </distributionManagement>
+        </profile>
+
+
+        <!--
+            Opt-in: bundle the built SPA (cumba-corej-rule-editor-web's dist/) into this
+            jar's static/ so the API serves the UI at / on the same origin — deployment
+            shape 1 of PLAN-rule-editor §4.2. The copy is bound to prepare-package so the
+            SPA lands in target/classes/static and is packaged into the (thin) jar, from
+            where the bundle's lib/ carries it. A missing directory is skipped with a
+            warning, yielding the API-only jar (shape 2). Does NOT change the default build:
+              mvn -Pbundle-web clean package -Dweb.dist.dir=/path/to/cumba-corej-rule-editor-web/dist
+
+            ⚠ The SPA is NOT in this repository — it is built separately. The directory is a
+            PROPERTY with no usable default rather than a relative path into a sibling
+            checkout that may not exist.
+        -->
+        <profile>
+            <id>bundle-web</id>
+            <properties>
+                <web.dist.dir>${project.basedir}/web-dist-not-configured</web.dist.dir>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-web-dist</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${web.dist.dir}</directory>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+            Publish to Maven Central. OPT-IN via `-P deploy-central`; the internal
+            `deploy-nexus` path is untouched. ⛔ THIS REPOSITORY PUBLISHES NOTHING TO
+            MAVEN CENTRAL: the rule editor is an application, delivered as the forge
+            release's bundle, so its one artifact is excluded here. excludeArtifacts is
+            plugin CONFIGURATION, out of reach of a command-line -D — the
+            central.skipPublishing property is only the global dry-run switch
+            (BLUEPRINT-oss-migration; cumba-oss-corej-rest carries the full reasoning).
+        -->
+        <profile>
+            <id>deploy-central</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${plugin.central-publishing-maven-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <skipPublishing>${central.skipPublishing}</skipPublishing>
+                            <waitUntil>validated</waitUntil>
+                            <excludeArtifacts>
+                                <excludeArtifact>cumba-oss-corej-rule-editor-rest</excludeArtifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+    <name>Cumba OSS coreJ Rule Editor REST</name>
+    <description>
+        The rule editor's REST service: forge login, per-user git workspaces over
+        JGit, branch / file / commit / push operations under the editor's
+        server-side rules, the explorer and the free-text search over the rule
+        corpus, and the engine's authoring API behind the analysis, the scenario grid
+        and the runs. The published twin of cumba-corej-rule-editor-rest.
+    </description>
+    <!--
+        Project URL. Points at the PUBLIC GitHub repository (BLUEPRINT-oss-migration,
+        Central metadata): nothing here goes to Maven Central, but the deployed pom
+        still points a reader at the repository the artifact was built from.
+    -->
+    <url child.project.url.inherit.append.path="false">https://github.com/cumba-oss/cumba-oss-corej-rule-editor-rest</url>
+    <organization>
+        <name>P300</name>
+        <url>https://www.p-300.com</url>
+    </organization>
+
+    <licenses>
+        <license>
+            <name>AGPL-3.0-only</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.txt</url>
+            <distribution>repo</distribution>
+            <comments>Licensed under the GNU Affero General Public License, version 3</comments>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Michael Weiss</name>
+            <email>mw@p-300.com</email>
+            <organization>P300</organization>
+            <organizationUrl>https://www.p-300.com</organizationUrl>
+        </developer>
+    </developers>
+
+    <!--
+        The public GitHub repository. <tag>HEAD</tag> is deliberate: releases are cut
+        by pushing a tag, not by maven-release-plugin, so nothing rewrites this.
+    -->
+    <scm child.scm.url.inherit.append.path="false"
+         child.scm.connection.inherit.append.path="false"
+         child.scm.developerConnection.inherit.append.path="false">
+        <connection>scm:git:https://github.com/cumba-oss/cumba-oss-corej-rule-editor-rest.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/cumba-oss/cumba-oss-corej-rule-editor-rest.git</developerConnection>
+        <url>https://github.com/cumba-oss/cumba-oss-corej-rule-editor-rest</url>
+        <tag>HEAD</tag>
+    </scm>
+    <dependencyManagement>
+        <dependencies>
+
+            <!--
+                Spring Boot's BOM, imported. It aligns the whole Spring/Jackson/Tomcat/
+                Spring Security constellation at one version; pinning the starters
+                individually is how those fall out of step.
+            -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${dependency.spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${dependency.springdoc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jgit</groupId>
+                <artifactId>org.eclipse.jgit</artifactId>
+                <version>${dependency.jgit.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-bootstrap</artifactId>
+                <version>${dependency.cumba-oss-commons.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-corej-authoring</artifactId>
+                <version>${dependency.cumba-oss-corej.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-corej-ruletest</artifactId>
+                <version>${dependency.cumba-oss-corej.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-corej-report-json</artifactId>
+                <version>${dependency.cumba-oss-corej.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-corej-core</artifactId>
+                <version>${dependency.cumba-oss-corej.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.cumba</groupId>
+                <artifactId>cumba-oss-datatable-provider-cdt</artifactId>
+                <version>${dependency.cumba-oss-datatable.version}</version>
+            </dependency>
+
+            <!-- Test framework BOM: aligns every JUnit artifact at one version. -->
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${dependency.junit.jupiter.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- JSpecify nullability annotations (NullAway). -->
+            <dependency>
+                <groupId>org.jspecify</groupId>
+                <artifactId>jspecify</artifactId>
+                <version>${dependency.jspecify.version}</version>
+                <scope>provided</scope>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+
+        <!-- ==== third-party ==== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!--
+            Spring Security: the session cookie, CSRF and the login endpoint's
+            authentication (PLAN-rule-editor section 5.1.4). The stack had no
+            security layer before this service.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+        </dependency>
+        <!--
+            ⚠⚠ PROVIDED, and the scope is load-bearing (as in cumba-corej-rest):
+            src/assembly/dist.xml's first dependencySet selects the launcher by that scope
+            and maps it to the bundle's root jar. At compile scope it lands in lib/ instead
+            and the bundle ships no launcher, with no error.
+        -->
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-bootstrap</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- ==== the engine (phase 3, PLAN-rule-editor §3 / §4.1) ==== -->
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-corej-authoring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-corej-ruletest</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-corej-report-json</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-corej-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.cumba</groupId>
+            <artifactId>cumba-oss-datatable-provider-cdt</artifactId>
+        </dependency>
+        <!-- compile scope, overriding the managed `provided`: Spring Framework 7
+             reads JSpecify annotations REFLECTIVELY at runtime
+             (org.springframework.core.Nullness.jSpecifyNullness), so a classpath
+             without them dies during context startup. Measured in cumba-corej-rest
+             2026-09-09 by running the assembled bundle. -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <!--
+            No Mockito (owner, 2026-09-28: real objects or small fakes). The starter
+            would put it on the test classpath anyway, and with the inline mock
+            maker an un-attached agent warns on every JVM start; excluded so a
+            `org.mockito` import cannot compile.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.mockito</groupId>
+                    <artifactId>mockito-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.mockito</groupId>
+                    <artifactId>mockito-junit-jupiter</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            Separate from spring-boot-starter-test: @WebMvcTest's slice
+            autoconfiguration lives in its own artifact.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- MockMvc's csrf() request post-processor. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!--
+            Filter ONLY version.properties, so this module's copy gets ${project.version} and the
+            git.* values substituted at build time. Every other resource (application.yaml) is
+            copied verbatim by the first, unfiltered entry.
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>version.properties</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>version.properties</include>
+                </includes>
+            </resource>
+        </resources>
+
+        <pluginManagement>
+            <plugins>
+                <!--
+                    Lifecycle plugins pinned centrally.
+
+                    ⚠ Without these, Maven supplies its OWN default version for
+                    each, taken from the super-POM of whatever Maven
+                    distribution runs the build — so the same source could
+                    produce jars from different plugin versions on two
+                    machines, and the drift is invisible. requireMavenVersion
+                    in the enforcer pins Maven itself, but not these.
+
+                    maven-deploy-plugin in particular is load-bearing now that
+                    the `deploy-nexus` profile publishes to Nexus.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>${plugin.maven-jar-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>${plugin.maven-clean-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-install-plugin</artifactId>
+                    <version>${plugin.maven-install-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>${plugin.maven-deploy-plugin.version}</version>
+                </plugin>
+
+                <plugin>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>${plugin.maven-resources-plugin.version}</version>
+                    <configuration>
+                        <propertiesEncoding>${general.encoding}</propertiesEncoding>
+                    </configuration>
+                </plugin>
+
+                <!--
+                    Third-party license aggregation. Run
+                    `mvn license:add-third-party` to produce
+                    src/license/THIRD-PARTY.txt summarising the
+                    licenses of every runtime dependency. Curated
+                    overrides go in src/license/licensesConfig.xml;
+                    the directory is created on demand.
+
+                    The source project also wired up <licenseUrlReplacements>
+                    here to rewrite well-known remote license URLs to local
+                    copies under src/license/licenses/ — not included in
+                    this template; add as needed.
+                -->
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>license-maven-plugin</artifactId>
+                    <version>${plugin.license-maven-plugin.version}</version>
+                    <configuration>
+                        <licensesConfigFile>${repo.root.dir}/src/license/licensesConfig.xml</licensesConfigFile>
+                        <licensesOutputDirectory>${repo.root.dir}/src/license/licenses</licensesOutputDirectory>
+                        <includeTransitiveDependencies>true</includeTransitiveDependencies>
+                        <excludedScopes>test,provided</excludedScopes>
+                        <!--
+                            Skip in-house modules. They are not third-party
+                            and should not appear in the license report;
+                            this also suppresses the "No license information
+                            available for ..." warnings, which fire before
+                            licensesConfigFile overrides are applied.
+                        -->
+                        <excludedGroups>\Qnet.cumba\E</excludedGroups>
+                    </configuration>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${plugin.maven-compiler-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            ⚠⚠ -parameters is REQUIRED here and is not in the split template.
+                            Spring MVC binds @RequestParam / @PathVariable arguments by parameter
+                            NAME when no explicit name is given, and without this flag those names
+                            are not in the class file: every such handler fails at context startup
+                            with "Name for argument of type [java.lang.String] not specified".
+                            Measured: 26 test errors, all of them that.
+                        -->
+                        <parameters>true</parameters>
+                        <debug>true</debug>
+                        <debuglevel>lines,vars,source</debuglevel>
+                        <failOnWarning>${maven.compiler.failOnWarning}</failOnWarning>
+                        <showWarnings>true</showWarnings>
+                        <!--
+                            -Xlint:all surfaces the categories javac keeps silent by default
+                            (cast, rawtypes, fallthrough, serial, try, …). With
+                            <failOnWarning> above, every emitted warning fails the build.
+
+                            ⚠ These flags used to live in the `dev` profile only, which made
+                            the DEVELOPMENT build stricter than the RELEASE build. They are in
+                            the base build now, so one setting governs every build.
+
+                            `processing` is off because it fires for every annotation no
+                            processor claims (@JsonIgnore, @JsonProperty …) when Lombok is the
+                            only processor on the path — a known false positive.
+
+                            javac caps warning/error display at 100; raise it so a lint sweep
+                            sees the full picture in one build.
+                        -->
+                        <compilerArgs combine.children="append">
+                            <arg>-Xlint:all,-processing,-classfile</arg>
+                            <arg>-Xmaxwarns</arg>
+                            <arg>10000</arg>
+                            <arg>-Xmaxerrs</arg>
+                            <arg>10000</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${plugin.maven-surefire-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            @{argLine} is surefire's late-binding syntax: it resolves the Maven
+                            argLine property at JVM fork time, which is AFTER jacoco:prepare-agent
+                            has set it. Using ${argLine} would resolve too early (during model
+                            interpolation) and bind to an empty value, causing the JaCoCo agent
+                            to be silently dropped and jacoco.exec to never be produced.
+                        -->
+                        <argLine>@{argLine}</argLine>
+                        <!--
+                            Pin the test JVM's working directory to a per-module scratch dir
+                            under target/. Any test that resolves a relative path (`new File("foo")`,
+                            `Paths.get("bar")`, …) will land there instead of inside the repo
+                            checkout, so `mvn clean` reliably wipes the spill and nothing leaks
+                            into the source tree. Tests that legitimately need the module dir
+                            or the repo root anchor them via the system properties below
+                            instead of relying on CWD.
+                        -->
+                        <workingDirectory>${project.build.directory}/test-cwd</workingDirectory>
+                        <systemPropertyVariables>
+                            <projectBasedir>${project.basedir}</projectBasedir>
+                            <!-- PLAN-define-ct-evaluation H1: every app-default fallback
+                                 (~/.cumbaDataBrowser/metadata-cache.zip, config.json, the
+                                 dictionary store) lands under target/, never in the developer's
+                                 real home. Repeated in the pitest jvmArgs, which inherit nothing
+                                 from here; TestHomeIsSandboxedTest is the control. -->
+                            <user.home>${project.build.directory}/test-home</user.home>
+                            <!-- review round 2: the Maven JVM's undirected home, so HomeStaysCleanExtension
+                                 knows which home is the REAL one (never $HOME - not what Java resolves on Windows). -->
+                            <realUserHome>${user.home}</realUserHome>
+                            <repoRoot>${repo.root.dir}</repoRoot>
+                            <!--
+                                Test-only JUL format: the shipped one-line layout MINUS the trailing
+                                %6$s, which is SimpleFormatter's THROWABLE placeholder. Without this, a
+                                passing test that asserts a thrown exception still dumps the production
+                                catch/log/rethrow stack trace into the build log; JUnit prints nothing
+                                itself (assertThrows just returns the throwable), so the noise is ours.
+                                Messages are kept, and a real test FAILURE is unaffected: Surefire
+                                prints the assertion's trace through its own reporter, not through JUL.
+                                Scope is test only; the shipped app/CLI logging.properties keep %6$s.
+                                MUST NOT contain a space: the pitest block below repeats this value and
+                                pitest splits jvmArgs on whitespace. Full rationale and the MINION_DIED
+                                trap: "JUL stack traces in test logs" in .claude/docs/build-gates.md
+                                of the databrowser-meta umbrella repo.
+                            -->
+                            <java.util.logging.SimpleFormatter.format>[%4$-7s]%2$s:%5$s%n</java.util.logging.SimpleFormatter.format>
+                            <!--
+                                Test-scope JUL configuration: the root logger stays at INFO and the
+                                CONSOLE HANDLER is filtered to WARNING, so records still reach a
+                                capture handler while the build log loses the application's own
+                                INFO chatter. Unit tests drive production code down its warning and
+                                error paths on purpose, so that chatter is expected noise. Measured
+                                over four CI job logs: 52% of all runner output was application
+                                logging, 44% INFO alone. The file carries the traps; repeated in the
+                                Pitest <jvmArgs>, which inherits nothing from here.
+                            -->
+                            <java.util.logging.config.file>${repo.root.dir}/logging-test.properties</java.util.logging.config.file>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+
+                <plugin>
+                    <groupId>com.github.spotbugs</groupId>
+                    <artifactId>spotbugs-maven-plugin</artifactId>
+                    <version>${plugin.spotbugs-maven-plugin.version}</version>
+                    <configuration>
+                        <effort>Max</effort>
+                        <threshold>Low</threshold>
+                        <xmlOutput>true</xmlOutput>
+                        <xmlOutputDirectory>target/site</xmlOutputDirectory>
+                        <!-- Project-wide filter applied to every module. The
+                             per-module spotbugs_ignore.xml is layered on top
+                             by the spotbugs-module-ignore profile (comma-
+                             separated path list). -->
+                        <excludeFilterFile>${repo.root.dir}/spotbugs_project_filter.xml</excludeFilterFile>
+                        <!-- Build-fail toggle driven by the
+                             spotbugs.failOnError property (default false).
+                             CI flips with -Dspotbugs.failOnError=true. -->
+                        <failOnError>${spotbugs.failOnError}</failOnError>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>spotbugs-check</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${plugin.jacoco-maven-plugin.version}</version>
+                    <executions>
+                        <!-- Attach agent before tests -->
+                        <execution>
+                            <id>prepare-agent</id>
+                            <goals><goal>prepare-agent</goal></goals>
+                        </execution>
+                        <!-- Generate per-module report -->
+                        <execution>
+                            <id>report</id>
+                            <phase>test</phase>
+                            <goals><goal>report</goal></goals>
+                        </execution>
+                        <!-- Enforce per-module coverage threshold -->
+                        <execution>
+                            <id>check</id>
+                            <phase>verify</phase>
+                            <goals><goal>check</goal></goals>
+                            <configuration>
+                                <!--
+                                    Top-level <excludes> (List<String>, comma-separated
+                                    via the shared property) filters class files from
+                                    the check's coverage analysis. Do NOT move this
+                                    inside <rule>: rule-level <excludes> match element
+                                    names (e.g. BUNDLE names = artifactIds), not class
+                                    paths, so the patterns would never match there.
+                                -->
+                                <excludes>${jacoco.coverage.excludes}</excludes>
+                                <rules>
+                                    <rule>
+                                        <element>BUNDLE</element>
+                                        <limits>
+                                            <limit>
+                                                <counter>LINE</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>${jacoco.line.coverage}</minimum>
+                                            </limit>
+                                        </limits>
+                                    </rule>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-site-plugin</artifactId>
+                    <version>${plugin.maven-site-plugin.version}</version>
+                </plugin>
+
+                <plugin>
+                    <groupId>io.github.git-commit-id</groupId>
+                    <artifactId>git-commit-id-maven-plugin</artifactId>
+                    <version>${plugin.git-commit-id-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>get-git-info</id>
+                            <goals>
+                                <goal>revision</goal>
+                            </goals>
+                            <phase>initialize</phase>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <dotGitDirectory>${project.basedir}/.git</dotGitDirectory>
+                        <prefix>git</prefix>
+                        <verbose>false</verbose>
+                        <generateGitPropertiesFile>true</generateGitPropertiesFile>
+                        <generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+                        <dateFormat>yyyy-MM-dd'T'HH:mm:ss'Z'</dateFormat>
+                        <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                        <includeOnlyProperties>
+                            <includeOnlyProperty>git.commit.id</includeOnlyProperty>
+                            <includeOnlyProperty>git.commit.id.abbrev</includeOnlyProperty>
+                            <includeOnlyProperty>git.branch</includeOnlyProperty>
+                            <includeOnlyProperty>git.commit.time</includeOnlyProperty>
+                            <includeOnlyProperty>git.build.time</includeOnlyProperty>
+                            <includeOnlyProperty>git.total.commit.count</includeOnlyProperty>
+                        </includeOnlyProperties>
+                    </configuration>
+                </plugin>
+
+                <plugin>
+                  <groupId>org.codehaus.mojo</groupId>
+                  <artifactId>versions-maven-plugin</artifactId>
+                  <version>2.21.0</version>
+                  <configuration>
+                    <ignoredVersions>(?i).*-(alpha|beta|m|rc)([-.]?\d+)?</ignoredVersions>
+                  </configuration>
+                </plugin>
+
+                <!--
+                    Spotless — formats Java source in-place at
+                    process-sources (i.e. before compile). Uses the
+                    Eclipse JDT formatter driven by eclipse-formatter.xml
+                    at the project root.
+
+                    upToDateChecking skips files unchanged since the
+                    last successful run; the index lives under
+                    target/spotless-*. Toggle to <enabled>false</enabled>
+                    when reformatting after a settings change.
+
+                    The Eclipse JDT version is pinned to 4.38.
+
+                    Retested 2026-09-07 against Spotless 3.10.2, which is
+                    what this pom now uses. The original reason for the pin
+                    is GONE: the diffplug/spotless#2897 metadata-parser
+                    regression no longer reproduces, and cumba-commons
+                    formats clean under JDT 4.39.
+
+                    The pin stays anyway, because moving it buys nothing.
+                    cumba-databrowser's ChatHtmlWriter.java still cannot be
+                    formatted at 4.39, 4.40 or 4.41 ("eclipse jdt formatter
+                    4.39 is currently being used, but outdated"), so its
+                    <excludes> entry is needed at every version tried. A JDT
+                    bump is a formatting-ENGINE change that can reformat the
+                    whole tree, so it is not worth taking for no gain.
+                    Re-evaluate when that one file can be formatted.
+
+                    To opt out per file: add `// spotless:off` … `// spotless:on`,
+                    or list the file under <excludes>.
+                -->
+                <plugin>
+                    <groupId>com.diffplug.spotless</groupId>
+                    <artifactId>spotless-maven-plugin</artifactId>
+                    <version>${plugin.spotless-maven-plugin.version}</version>
+                    <configuration>
+                        <upToDateChecking>
+                            <enabled>true</enabled>
+                        </upToDateChecking>
+                        <java>
+                            <includes>
+                                <include>src/main/java/**/*.java</include>
+                                <include>src/test/java/**/*.java</include>
+                            </includes>
+                            <eclipse>
+                                <version>4.38</version>
+                                <file>${repo.root.dir}/eclipse-formatter.xml</file>
+                            </eclipse>
+                            <importOrder/>
+                            <removeUnusedImports/>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                        </java>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>spotless-apply</id>
+                            <!-- process-sources runs before compile, so formatting happens first.
+                                 Phase is parametrised via spotless.apply.phase so the
+                                 `spotless-check-mode` profile can flip it to `none`. -->
+                            <phase>${spotless.apply.phase}</phase>
+                            <goals>
+                                <goal>apply</goal>
+                            </goals>
+                            <?m2e ignore?>
+                        </execution>
+                        <execution>
+                            <id>spotless-check</id>
+                            <!-- Bound to `none` by default; the `spotless-check-mode`
+                                 profile (activated by -Dspotless.check=true) flips this
+                                 to `process-sources` so CI verifies without rewriting. -->
+                            <phase>${spotless.check.phase}</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                            <?m2e ignore?>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!--
+                    m2e (Eclipse) lifecycle mapping: tells the Eclipse
+                    incremental builder to ignore spotless:apply during
+                    in-IDE builds. Without this, every save would
+                    trigger spotless to rewrite the file, which
+                    re-triggers m2e's resource-changed listener, which
+                    re-runs spotless — a build loop. Maven CLI builds
+                    are unaffected.
+                -->
+                <plugin>
+                    <groupId>org.eclipse.m2e</groupId>
+                    <artifactId>lifecycle-mapping</artifactId>
+                    <version>1.0.0</version>
+                    <configuration>
+                        <lifecycleMappingMetadata>
+                            <pluginExecutions>
+                                <pluginExecution>
+                                    <pluginExecutionFilter>
+                                        <groupId>com.diffplug.spotless</groupId>
+                                        <artifactId>spotless-maven-plugin</artifactId>
+                                        <versionRange>[0,)</versionRange>
+                                        <goals>
+                                            <goal>apply</goal>
+                                        </goals>
+                                    </pluginExecutionFilter>
+                                    <action>
+                                        <!-- Don't run spotless:apply on Eclipse incremental builds;
+                                             it rewrites sources and re-triggers the build loop. -->
+                                        <ignore/>
+                                    </action>
+                                </pluginExecution>
+                            </pluginExecutions>
+                        </lifecycleMappingMetadata>
+                    </configuration>
+                </plugin>
+
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!--
+                No <mainClass>, as in cumba-corej-rest: the plain jar is a library on a
+                lib/ classpath. The runnable artefact is the cumba-bootstrap bundle
+                (make-dist below, src/assembly/dist.xml); a dev run without it is
+                  java -cp "target/classes:target/libs/*" net.cumba.corej.editor.RuleEditorApplication
+                after `mvn package` (copy-runtime-deps below fills target/libs).
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addClasspath>true</addClasspath>
+                            <classpathPrefix>libs/</classpathPrefix>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>${plugin.maven-dependency-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <?m2e ignore?>
+                        <id>copy-runtime-deps</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/libs</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                            <overWriteReleases>false</overWriteReleases>
+                            <overWriteSnapshots>true</overWriteSnapshots>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                The runnable release distribution (PLAN-rule-editor phase 4):
+                src/assembly/dist.xml bundles the cumba-bootstrap launcher, this project's
+                jar, every runtime dependency, an external config/ directory and a sidecar
+                .conf into one zip (+ the same tree exploded, for the smoke test and the
+                Dockerfile). Replaces `spring-boot:repackage`, which is NOT bound here.
+
+                ⚠ Must stay declared AFTER maven-jar-plugin above; same-phase executions
+                run in declaration order. ⛔ DO NOT ATTACH: the zip ships as a Gitea release
+                asset, never through Maven.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>${plugin.maven-assembly-plugin.version}</version>
+                <configuration>
+                    <appendAssemblyId>false</appendAssemblyId>
+                    <attach>false</attach>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-dist</id>
+                        <phase>package</phase>
+                        <goals><goal>single</goal></goals>
+                        <configuration>
+                            <finalName>cumba-oss-corej-rule-editor-rest-${project.version}</finalName>
+                            <descriptors>
+                                <descriptor>src/assembly/dist.xml</descriptor>
+                            </descriptors>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Javadoc as a BUILD gate, not only a release step. Broken javadoc
+                references are invisible to compile, tests, spotless, PMD and SpotBugs,
+                and otherwise surface only at publish time. failOnError=true is the
+                whole point; doclint all,-missing keeps missing-@return quiet while
+                still failing on broken references.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${plugin.maven-javadoc-plugin.version}</version>
+                <configuration>
+                    <failOnError>true</failOnError>
+                    <doclint>all,-missing</doclint>
+                    <quiet>true</quiet>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>javadoc-gate</id>
+                        <phase>package</phase>
+                        <goals><goal>javadoc-no-fork</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <inherited>true</inherited>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${plugin.maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-maven-version</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <requireMavenVersion><version>${maven.version}</version></requireMavenVersion>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                SpotBugs is wired in by the SpotBugs profile (active by default,
+                disable with `-DskipSpotbugs`); pluginManagement above only carries
+                the configuration.
+            -->
+
+            <!--
+                Build provenance. pluginManagement above carries the whole
+                configuration; this bare entry is what actually BINDS it into the
+                lifecycle. Without it no git.properties is produced anywhere.
+            -->
+            <plugin>
+                <groupId>io.github.git-commit-id</groupId>
+                <artifactId>git-commit-id-maven-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                Loads sonar-exclusions.properties at the start of the build so the
+                sonar-maven-plugin sees the sonar.issue.ignore.* keys.
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>properties-maven-plugin</artifactId>
+                <version>1.2.1</version>
+                <inherited>false</inherited>
+                <executions>
+                    <execution>
+                        <id>load-sonar-exclusions</id>
+                        <phase>initialize</phase>
+                        <goals><goal>read-project-properties</goal></goals>
+                        <configuration>
+                            <files>
+                                <file>${repo.root.dir}/sonar-exclusions.properties</file>
+                            </files>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>5.6.0.6792</version>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.7.3</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+            </plugin>
+
+        </plugins>
+
+    </build>
+
+    <reporting>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-project-info-reports-plugin</artifactId>
+                <version>${plugin.maven-project-info-reports-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-site-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>${plugin.maven-pmd-plugin.version}</version>
+            </plugin>
+        </plugins>
+    </reporting>
+</project>

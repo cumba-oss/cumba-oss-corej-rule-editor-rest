@@ -1,0 +1,36 @@
+# External Spring configuration for this bundle.
+#
+# The launcher points Spring at this directory with
+# `spring.config.additional-location` (see cumba-oss-corej-rule-editor-rest.conf), so
+# everything here OVERRIDES the application.yaml packaged inside the jar and
+# leaves the rest of it in place. Uncomment only what you need; the packaged file
+# documents every key.
+#
+# Restart the service after editing.
+
+#server:
+#  port: 8081
+#  servlet:
+#    session:
+#      cookie:
+#        # Plain-HTTP deployments (a developer run, a proxy that terminates TLS
+#        # elsewhere) must relax this or the browser never sends the cookie back.
+#        secure: false
+#        # Two apps on sibling subdomains of ONE site (PLAN-rule-editor §4.2 shape 2):
+#        # the cookie's domain must cover both.
+#        domain: example.org
+
+# ⭐ THE INSTALLATION: one instance serves ONE repository on ONE forge.
+#editor:
+#  repository:
+#    url: https://forge.example.org/owner/rules.git
+#  forge:
+#    type: gitea            # gitea | github
+#    api-url: https://forge.example.org/api/v1
+#  workspace-root: /var/lib/rule-editor/workspaces
+#  cors:
+#    # Only for the two-apps-on-sibling-subdomains shape. Empty (the default) means no
+#    # cross-origin request is answered — the bundled SPA and the reverse-proxy shape
+#    # are same-origin and need nothing here. A cross-SITE origin cannot work (§4.2).
+#    allowed-origins:
+#      - https://rule-editor.example.org
