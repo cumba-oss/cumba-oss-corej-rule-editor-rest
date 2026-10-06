@@ -35,7 +35,7 @@ class GiteaClientTest
     {
         server = new FakeForgeServer();
         client = new GiteaClient(server.baseUrl() + "/api/v1/");
-        repo = RepositoryCoordinates.parse(server.baseUrl() + "/acme/rules.git");
+        repo = RepositoryCoordinates.parse(server.baseUrl() + "/acme/rules.git", true, false);
     }
 
 
@@ -157,7 +157,8 @@ class GiteaClientTest
             base = gone.baseUrl();
         }
         GiteaClient c = new GiteaClient(base + "/api/v1");
-        assertFalse(c.anonymouslyReadable(RepositoryCoordinates.parse(base + "/a/b.git")));
+        assertFalse(
+                c.anonymouslyReadable(RepositoryCoordinates.parse(base + "/a/b.git", true, false)));
         assertEquals("FORGE_UNAVAILABLE",
                 assertThrows(EditorException.class, () -> c.user(CREDS)).code());
     }

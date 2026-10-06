@@ -11,9 +11,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import net.cumba.corej.editor.corpus.CorpusLayout;
+import net.cumba.corej.editor.engine.CdtService;
 import net.cumba.corej.editor.engine.Json;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import net.cumba.corej.editor.testing.TestStore;
+import net.cumba.corej.ruletest.cdt.ruletest.RuleTestCdt;
+import net.cumba.corej.ruletest.cdt.ruletest.RuleTestScenario;
+import net.cumba.corej.ruletest.cdt.ruletest.SidecarResolver;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -85,8 +89,70 @@ class RunExecutorTest
                 r.expectations().lines().toString());
         assertTrue(r.expectations().lines().get(1).startsWith("#expectViolationAt row=1"),
                 r.expectations().lines().toString());
+        assertEquals("violation", r.expectations().expect());
+        assertEquals("#test CDISC-CG0270 expect=violation domain=AE", r.expectations().testLine(),
+                "the verdict stays; the line is shown unchanged");
         assertEquals("inline", r.worker());
         assertEquals(List.of(), r.ruleDiagnostics());
+    }
+
+
+    /** The text "take actual as expected" writes, parsed by the engine's own scenario parser. */
+    static RuleTestScenario confirmed(Path aRoot, String aCdt, RunReport.Expectations aProposal)
+        throws IOException
+    {
+        String written = CdtService.withExpectations(aCdt, aProposal.lines(), aProposal.expect());
+        assertTrue(written.contains(aProposal.testLine() + "\n"), written);
+        Path file = suites(aRoot).resolve("confirmed.cdt");
+        SidecarResolver sidecars = SidecarResolver.rootedAt(aRoot.resolve(CorpusLayout.SCENARIOS));
+        return RuleTestCdt.parse(written, "confirmed.cdt", sidecars.includeResolver(file));
+    }
+
+
+    @Test
+    void aRuleThatFiresOnANoViolationScenarioProposesExpectViolation(@TempDir Path aRoot)
+        throws IOException
+    {
+        // REST review #2: the old proposal kept expect=noViolation beside #expectViolationAt
+        // lines — a buffer the parser refuses
+        String cdt = RemoteRepo.INITIAL_FILES.get(RemoteRepo.SCENARIO_B_VALID).replace(
+                "STUDY1 | 01-001 | HEADACHE | HEADACHE", "STUDY1 | 01-001 | \"\" | HEADACHE");
+        RunReport r = RunExecutor.execute(job(aRoot, RemoteRepo.CHECK_B_TEXT, cdt, null));
+        assertEquals("FAIL", r.outcome(), r.detail());
+        RunReport.Expectations e = r.expectations();
+        assertNotNull(e, r.toString());
+        assertEquals("violation", e.expect());
+        assertEquals("#test CDISC-CG0270 expect=violation domain=AE", e.testLine());
+        assertEquals(1, e.count());
+        RuleTestScenario parsed = confirmed(aRoot, cdt, e);
+        assertEquals(RuleTestScenario.Verdict.VIOLATION, parsed.getExpect());
+        assertEquals(1, parsed.getExpectViolationCount());
+        assertEquals(1, parsed.getExpectedViolations().size());
+    }
+
+
+    @Test
+    void nothingFiringOnAViolationScenarioProposesNoViolationWithoutExpectations(
+            @TempDir Path aRoot)
+        throws IOException
+    {
+        String cdt = RemoteRepo.SCENARIO_B_INVALID_TEXT
+                .replace("STUDY1 | 01-001 | 1 | \"\" | HEADACHE",
+                        "STUDY1 | 01-001 | 1 | HEADACHE | HEADACHE")
+                .replace("#expectViolationCount 1\n",
+                        "#expectViolationCount 1\n#expectViolationAt row=1 AEDECOD=HEADACHE\n");
+        RunReport r = RunExecutor.execute(job(aRoot, RemoteRepo.CHECK_B_TEXT, cdt, null));
+        assertEquals("FAIL", r.outcome(), r.detail());
+        RunReport.Expectations e = r.expectations();
+        assertNotNull(e, r.toString());
+        assertEquals("noViolation", e.expect());
+        assertEquals(List.of(), e.lines(), "the expectations are cleared");
+        assertNull(e.count());
+        assertEquals("#test CDISC-CG0270 expect=noViolation domain=AE", e.testLine());
+        RuleTestScenario parsed = confirmed(aRoot, cdt, e);
+        assertEquals(RuleTestScenario.Verdict.NO_VIOLATION, parsed.getExpect());
+        assertNull(parsed.getExpectViolationCount());
+        assertEquals(List.of(), parsed.getExpectedViolations());
     }
 
 

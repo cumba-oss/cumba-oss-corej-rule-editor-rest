@@ -17,6 +17,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.cumba.corej.authoring.AssembledRule;
@@ -36,6 +41,7 @@ import net.cumba.corej.editor.engine.LruCache;
 import net.cumba.corej.editor.engine.PackageStandards;
 import net.cumba.corej.editor.git.ChangedFile;
 import net.cumba.corej.editor.git.CorpusSource;
+import net.cumba.corej.editor.git.OverlaySource;
 import net.cumba.corej.editor.web.Access;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -51,11 +57,22 @@ import org.springframework.stereotype.Component;
  * (§5.5).
  *
  * <p>
- * Cached per view: the key is the HEAD plus the content hash of every uncommitted check / docs
- * file, so a save on the working tree or a branch switch rebuilds it and a reread of the same tree
- * is a hit. A whole corpus assembles in a few seconds (measured 2026-10-06: 3 461 rules in 1.7–3.2
- * s), built synchronously on first use under the workspace lock the controller holds.
+ * Cached per view: the key is the HEAD plus the content hash of every uncommitted check / docs /
+ * scenario file, so a save on the working tree or a branch switch rebuilds it and a reread of the
+ * same tree is a hit. A whole corpus assembles in a few seconds (measured 2026-10-06: 3 461 rules
+ * in 1.7–3.2 s). REST review #5:
  * </p>
+ * <ul>
+ * <li>the locked part of a request only {@link #prepare prepares}: the key, and the changed files'
+ * bytes over the immutable HEAD snapshot ({@link OverlaySource}); the build reads that, OUTSIDE the
+ * workspace lock — the user's saves are not blocked for seconds, and a save during the build cannot
+ * tear it;</li>
+ * <li>single-flight per key: concurrent requests for one view wait for one build;</li>
+ * <li>incremental: when an index of the same HEAD is cached, only the rules whose check, docs or
+ * scenario files differ between the two change sets are summarised again — a rule's summary reads
+ * nothing else that can differ at one HEAD (the package standards and the registers are outside the
+ * editable trees).</li>
+ * </ul>
  */
 @Component
 public class CorpusAnalysisIndex
@@ -64,6 +81,11 @@ public class CorpusAnalysisIndex
     private static final Logger LOG = LoggerFactory.getLogger(CorpusAnalysisIndex.class);
 
     private static final int MAX_CACHED = 4;
+
+    /** Beyond this many changed rules an incremental rebuild is not worth its bookkeeping. */
+    static final int MAX_INCREMENTAL_RULES = 200;
+
+    private static final String DELETED = "-";
 
     private static final Pattern CALL = Pattern.compile("\\b([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
 
@@ -106,6 +128,23 @@ public class CorpusAnalysisIndex
     }
 
 
+    /**
+     * What the locked part of a request hands the index (REST review #5): the cache key, the HEAD
+     * it is of, the content hash of every changed corpus file ({@code -} for a deleted one), and a
+     * source that stays valid after the lock is released — the HEAD snapshot with the changed
+     * files' bytes laid over it.
+     */
+    public record Request(String key, String head, Map<String, String> changeHashes,
+            CorpusSource source)
+    {
+
+        public Request
+        {
+            changeHashes = Collections.unmodifiableMap(new TreeMap<>(changeHashes));
+        }
+    }
+
+
     /** The index of one view. */
     public static final class Index
     {
@@ -116,12 +155,26 @@ public class CorpusAnalysisIndex
 
         private final Map<String, Map<String, String>> domainClasses;
 
+        private final String head;
+
+        private final Map<String, String> changeHashes;
+
         Index(Map<String, RuleSummary> aRules, CorpusIndex aCorpusIndex,
                 Map<String, Map<String, String>> aDomainClasses)
+        {
+            this(aRules, aCorpusIndex, aDomainClasses, "", Map.of());
+        }
+
+
+        Index(Map<String, RuleSummary> aRules, CorpusIndex aCorpusIndex,
+                Map<String, Map<String, String>> aDomainClasses, String aHead,
+                Map<String, String> aChangeHashes)
         {
             rules = Collections.unmodifiableMap(new LinkedHashMap<>(aRules));
             corpusIndex = aCorpusIndex;
             domainClasses = Map.copyOf(aDomainClasses);
+            head = aHead;
+            changeHashes = Map.copyOf(aChangeHashes);
         }
 
 
@@ -172,6 +225,10 @@ public class CorpusAnalysisIndex
 
     private final Map<String, Index> cache = new LruCache<>(MAX_CACHED);
 
+    private final Map<String, CompletableFuture<Index>> inflight = new ConcurrentHashMap<>();
+
+    private final AtomicInteger summarised = new AtomicInteger();
+
     public CorpusAnalysisIndex(EngineStore aStore, PackageStandards aStandards)
     {
         store = aStore;
@@ -185,51 +242,260 @@ public class CorpusAnalysisIndex
     }
 
 
-    /** The index of the view, built on first use. */
+    /**
+     * The index of the view: {@link #prepare} then {@link #of(Request)} — tests and callers that
+     * hold no lock.
+     */
     public Index of(Access.View aView) throws IOException
     {
-        String key = key(aView);
-        synchronized (cache)
+        return of(prepare(aView));
+    }
+
+
+    /**
+     * The locked half (REST review #5): the key and the changed files' bytes, read from the view
+     * while the caller holds the workspace lock — nothing here assembles a rule.
+     */
+    public static Request prepare(Access.View aView) throws IOException
+    {
+        StringBuilder sb = new StringBuilder(aView.head());
+        Map<String, String> hashes = new TreeMap<>();
+        Map<String, Optional<byte[]>> overlay = new TreeMap<>();
+        for (Map.Entry<String, ChangedFile.Kind> change : new TreeMap<>(aView.changes()).entrySet())
         {
-            Index cached = cache.get(key);
-            if (cached != null)
+            String path = change.getKey();
+            if (!inCorpusTrees(path))
             {
-                return cached;
+                continue;
             }
+            Optional<byte[]> content = aView.source().read(path);
+            String hash = content.map(CorpusAnalysisIndex::sha1).orElse(DELETED);
+            sb.append('|').append(path).append(':').append(change.getValue()).append(':')
+                    .append(hash);
+            hashes.put(path, hash);
+            overlay.put(path, content);
         }
-        long t0 = System.nanoTime();
-        Index built = build(aView.source());
-        LOG.info("indexed {} rules of {}@{} in {} ms", built.rules().size(), aView.branch(),
-                aView.head(), (System.nanoTime() - t0) / 1_000_000);
+        CorpusSource source = overlay.isEmpty() ? aView.headSnapshot()
+                : new OverlaySource(aView.headSnapshot(), overlay);
+        return new Request(sb.toString(), aView.head(), hashes, source);
+    }
+
+
+    static boolean inCorpusTrees(String aPath)
+    {
+        return aPath.startsWith(CorpusLayout.CHECKS + "/")
+                || aPath.startsWith(CorpusLayout.DOCS + "/")
+                || aPath.startsWith(CorpusLayout.SCENARIOS + "/");
+    }
+
+
+    /** The cache key of a view (its {@link Request#key()}). */
+    static String key(Access.View aView) throws IOException
+    {
+        return prepare(aView).key();
+    }
+
+
+    /**
+     * The index of a prepared request, built on first use — outside any workspace lock, once per
+     * key however many requests ask at the same time (single-flight), incrementally from a cached
+     * index of the same HEAD when there is one.
+     */
+    public Index of(Request aRequest) throws IOException
+    {
+        Index cached = cached(aRequest.key());
+        if (cached != null)
+        {
+            return cached;
+        }
+        CompletableFuture<Index> mine = new CompletableFuture<>();
+        CompletableFuture<Index> running = inflight.putIfAbsent(aRequest.key(), mine);
+        if (running != null)
+        {
+            return await(running);
+        }
+        try
+        {
+            // the winner of a race that a build finished in between finds it cached now
+            Index built = cached(aRequest.key());
+            if (built == null)
+            {
+                built = build(aRequest);
+                synchronized (cache)
+                {
+                    cache.put(aRequest.key(), built);
+                }
+            }
+            mine.complete(built);
+            return built;
+        }
+        catch (IOException | RuntimeException e)
+        {
+            mine.completeExceptionally(e);
+            throw e;
+        }
+        finally
+        {
+            inflight.remove(aRequest.key(), mine);
+        }
+    }
+
+
+    private @Nullable Index cached(String aKey)
+    {
         synchronized (cache)
         {
-            cache.put(key, built);
+            return cache.get(aKey);
         }
+    }
+
+
+    /** The result of another request's build of the same key; its failure as an I/O failure. */
+    private static Index await(CompletableFuture<Index> aBuild) throws IOException
+    {
+        try
+        {
+            return aBuild.join();
+        }
+        catch (CompletionException | CancellationException e)
+        {
+            throw new IOException("the corpus index build this request waited for failed", e);
+        }
+    }
+
+
+    /** How many rules were summarised so far (the single-flight and incremental tests count). */
+    int summarisedCount()
+    {
+        return summarised.get();
+    }
+
+
+    private Index build(Request aRequest) throws IOException
+    {
+        long t0 = System.nanoTime();
+        Index base = sameHead(aRequest.head());
+        Index built = base == null ? null : incremental(base, aRequest);
+        String how = "incrementally";
+        if (built == null)
+        {
+            built = build(aRequest.source(), aRequest.head(), aRequest.changeHashes());
+            how = "fully";
+        }
+        LOG.info("indexed {} rules of {} {} in {} ms", built.rules().size(), aRequest.head(), how,
+                (System.nanoTime() - t0) / 1_000_000);
         return built;
     }
 
 
-    static String key(Access.View aView) throws IOException
+    /** The most recently used cached index of the HEAD, if any. */
+    private @Nullable Index sameHead(String aHead)
     {
-        StringBuilder sb = new StringBuilder(aView.head());
-        for (Map.Entry<String, ChangedFile.Kind> change : new TreeMap<>(aView.changes()).entrySet())
+        Index found = null;
+        synchronized (cache)
         {
-            String path = change.getKey();
-            if (!path.startsWith(CorpusLayout.CHECKS + "/")
-                    && !path.startsWith(CorpusLayout.DOCS + "/")
-                    && !path.startsWith(CorpusLayout.SCENARIOS + "/"))
+            // access order: the last match is the most recently used
+            for (Index i : cache.values())
             {
-                continue;
+                if (i.head.equals(aHead))
+                {
+                    found = i;
+                }
             }
-            sb.append('|').append(path).append(':').append(change.getValue());
-            Optional<byte[]> content = aView.source().read(path);
-            sb.append(':').append(content.map(CorpusAnalysisIndex::sha1).orElse("-"));
         }
-        return sb.toString();
+        return found;
     }
 
 
-    static String sha1(byte[] aBytes)
+    /**
+     * Rebuilds only the rules whose files differ between the base's change set and the request's;
+     * null when the difference is not attributable to rules (or too large to be worth it).
+     */
+    private @Nullable Index incremental(Index aBase, Request aRequest) throws IOException
+    {
+        Set<String> paths = new LinkedHashSet<>();
+        for (Map.Entry<String, String> e : aBase.changeHashes.entrySet())
+        {
+            if (!e.getValue().equals(aRequest.changeHashes().get(e.getKey())))
+            {
+                paths.add(e.getKey());
+            }
+        }
+        for (Map.Entry<String, String> e : aRequest.changeHashes().entrySet())
+        {
+            if (!e.getValue().equals(aBase.changeHashes.get(e.getKey())))
+            {
+                paths.add(e.getKey());
+            }
+        }
+        Map<String, String> touched = new TreeMap<>(); // rule id -> family, when known
+        for (String path : paths)
+        {
+            RuleRef ref = ruleOf(path, aBase);
+            if (ref == null)
+            {
+                return null;
+            }
+            if (ref.family() != null || !touched.containsKey(ref.id()))
+            {
+                touched.put(ref.id(), ref.family());
+            }
+        }
+        if (touched.size() > MAX_INCREMENTAL_RULES)
+        {
+            return null;
+        }
+        Map<String, RuleSummary> rules = new TreeMap<>(aBase.rules());
+        for (Map.Entry<String, String> t : touched.entrySet())
+        {
+            String id = t.getKey();
+            String family = t.getValue();
+            rules.remove(id);
+            if (family != null && aRequest.source().exists(CorpusLayout.checkPath(family, id)))
+            {
+                rules.put(id, summarise(aRequest.source(), family, id));
+            }
+        }
+        return assemble(rules, aRequest.source(), aRequest.head(), aRequest.changeHashes());
+    }
+
+    /** A rule a changed path belongs to; the family when the path or the base names it. */
+    private record RuleRef(String id, @Nullable String family)
+    {
+    }
+
+    private static @Nullable RuleRef ruleOf(String aPath, Index aBase)
+    {
+        for (String tree : List.of(CorpusLayout.CHECKS, CorpusLayout.DOCS))
+        {
+            String prefix = tree + "/";
+            if (aPath.startsWith(prefix))
+            {
+                String[] parts = aPath.substring(prefix.length()).split("/", -1);
+                if (parts.length != 2 || !CorpusLayout.isCheckFile(parts[1]))
+                {
+                    return null;
+                }
+                return new RuleRef(CorpusLayout.ruleId(parts[1]), parts[0]);
+            }
+        }
+        String prefix = CorpusLayout.SCENARIOS + "/";
+        if (aPath.startsWith(prefix))
+        {
+            // <scenarios>/<family dir>/<RULE-ID>/<file>: the rule is the third-to-last segment
+            String[] parts = aPath.substring(prefix.length()).split("/", -1);
+            if (parts.length != 3)
+            {
+                return null;
+            }
+            RuleSummary known = aBase.rules().get(parts[1]);
+            return new RuleRef(parts[1], known == null ? null : known.family());
+        }
+        return null;
+    }
+
+
+    public static String sha1(byte[] aBytes)
     {
         try
         {
@@ -244,8 +510,14 @@ public class CorpusAnalysisIndex
 
     Index build(CorpusSource aSource) throws IOException
     {
+        return build(aSource, "", Map.of());
+    }
+
+
+    private Index build(CorpusSource aSource, String aHead, Map<String, String> aChangeHashes)
+        throws IOException
+    {
         Map<String, RuleSummary> rules = new TreeMap<>();
-        Map<String, JsonNode> checks = new HashMap<>();
         for (CorpusSource.TreeEntry familyDir : aSource.list(CorpusLayout.CHECKS))
         {
             if (!familyDir.directory())
@@ -260,12 +532,24 @@ public class CorpusAnalysisIndex
                     continue;
                 }
                 String id = CorpusLayout.ruleId(file.name());
-                RuleSummary summary = summarise(aSource, family, id);
-                rules.put(id, summary);
-                if (summary.check() != null)
-                {
-                    checks.put(id, summary.check());
-                }
+                rules.put(id, summarise(aSource, family, id));
+            }
+        }
+        return assemble(rules, aSource, aHead, aChangeHashes);
+    }
+
+
+    /** The corpus-wide parts over the summaries: the CorpusIndex, its registers, the classes. */
+    private Index assemble(Map<String, RuleSummary> aRules, CorpusSource aSource, String aHead,
+            Map<String, String> aChangeHashes)
+        throws IOException
+    {
+        Map<String, JsonNode> checks = new HashMap<>();
+        for (RuleSummary summary : aRules.values())
+        {
+            if (summary.check() != null)
+            {
+                checks.put(summary.id(), summary.check());
             }
         }
         CorpusIndex corpusIndex = CorpusIndex.of(checks);
@@ -287,13 +571,14 @@ public class CorpusAnalysisIndex
         {
             corpusIndex = corpusIndex.withParentage(parentage);
         }
-        return new Index(rules, corpusIndex, domainClasses(rules.values()));
+        return new Index(aRules, corpusIndex, domainClasses(aRules.values()), aHead, aChangeHashes);
     }
 
 
     private RuleSummary summarise(CorpusSource aSource, String aFamily, String aId)
         throws IOException
     {
+        summarised.incrementAndGet();
         String checkPath = CorpusLayout.checkPath(aFamily, aId);
         String docsPath = CorpusLayout.docsPath(aFamily, aId);
         String checkText = CorpusText.readOrEmpty(aSource, checkPath);
@@ -475,7 +760,17 @@ public class CorpusAnalysisIndex
     public RuleSearch.Result search(Access.View aView, String aQuery, Filter aFilter, int aLimit)
         throws IOException
     {
-        Index index = of(aView);
+        return search(prepare(aView), aQuery, aFilter, aLimit);
+    }
+
+
+    /**
+     * {@link #search(Access.View, String, Filter, int)} on a prepared request, outside the lock.
+     */
+    public RuleSearch.Result search(Request aRequest, String aQuery, Filter aFilter, int aLimit)
+        throws IOException
+    {
+        Index index = of(aRequest);
         List<RuleSearch.Term> terms = RuleSearch.parse(aQuery);
         int limit = Math.max(1, Math.min(aLimit, RuleSearch.MAX_LIMIT));
         List<RuleSearch.Hit> hits = new ArrayList<>();

@@ -56,10 +56,17 @@ itself off when the probe fails.
   paths, `..`, any `.git` segment and any hidden segment answer `400 BAD_PATH`; the resolved path
   must stay inside the clone with symlinks not followed, and no symlink is ever read or listed.
 - **No hooks, no symlinks in clones** — every clone has `core.symlinks=false` and
-  `core.hooksPath` pointing at the empty, server-owned `<workspace-root>/.hooks-disabled/`;
-  commits pass `--no-verify`.
+  `core.hooksPath` pointing at the empty, server-owned `editor.workspace.hooks-dir` (default
+  `<workspace-root>/.hooks-disabled/`; the container image's is root-owned and read-only). ⚠ That
+  setting is the control: commits also pass `--no-verify`, which skips only `pre-commit` /
+  `commit-msg` — JGit still runs `post-commit` from the hooks directory (the test plants it).
 - **The default branch is read-only** — file writes, commits, pushes and updates on it answer
-  `409 DEFAULT_BRANCH`; changes reach it through a pull request.
+  `409 DEFAULT_BRANCH` (compared case-insensitively); changes reach it through a pull request.
+  ⚠ The editor's check is a convenience, frozen at clone: the **forge's branch protection** on
+  the default branch is the real barrier — keep it on.
+- **Branch names are ref names** — every name a request carries (create, switch, delete,
+  update) is checked as a valid ref name not starting with `-` before JGit sees it
+  (`400 BAD_REQUEST`).
 - **Clean tree for branch switch and update-from-\*** — `409 DIRTY_TREE` names the files.
 - **Discard is commit's inverse** — `POST /api/discard` acts on exactly the set a commit would
   stage (the uncommitted changes under the allow-list): a path HEAD holds is restored from HEAD
@@ -73,7 +80,10 @@ itself off when the probe fails.
   symlink element) before the first change — one refused path leaves the tree as it was.
 - **Optimistic concurrency** — every mutating request carries the client's `branch` and `head`
   (and `blob` for a file write); a mismatch is `409 STALE` with the current `branch` / `head`,
-  and the UI reloads. Every access to a workspace runs under its lock, reads included.
+  and the UI reloads. Every access to a workspace runs under its lock, reads included — waited
+  for at most `editor.limits.workspace-lock-wait`, then `503 WORKSPACE_BUSY`. Nothing slow holds
+  it: a run exports under it and runs outside it, the search index is prepared under it and built
+  outside it, from the HEAD snapshot plus the changed files read under the lock.
 - **Push is never forced** — `409 NON_FAST_FORWARD` offers *update from remote branch*.
 - **A conflicting merge is aborted** by resetting to the pre-merge HEAD, `409 MERGE_CONFLICT`
   naming the paths.
@@ -81,16 +91,34 @@ itself off when the probe fails.
   ref, or there is no tracking ref and HEAD is not the SHA this server last pushed (kept in
   `.git/config`, never in the tree). A branch the forge squash-merged and deleted therefore stops
   counting as unpushed after a fetch with prune, and *delete branch* removes it.
+- **Transports time out** — every clone, fetch, push and ls-remote has
+  `editor.workspace.git-timeout` (60 s).
+- **Retention deletes under the lock** — the check "untouched, clean, nothing unpushed" and the
+  deletion happen in one lock hold; a workspace whose lock a request holds is kept.
+- **Request limits** — a request body above `editor.limits.max-request-bytes` (default four
+  buffers) answers `413 TOO_LARGE` before anyone reads it; logins are limited to
+  `editor.limits.logins-per-minute` per client (`429 RATE_LIMITED`); anonymous searches to
+  `editor.anonymous.searches-per-minute` with at most `max-search-results` hits. A *client* is the
+  TCP peer, or — behind one of `editor.trusted-proxies` — the right-most untrusted
+  `X-Forwarded-For` hop; IPv6 counts by its `/64`.
+- **No server path in an answer** — an I/O failure answers a generic text, a 5xx message has the
+  workspace root replaced by `<workspaces>`, the store's reason names its file only.
 
 ## Session and CSRF
 
-Session cookie `HttpOnly; Secure; SameSite=Lax`, never persisted, 8 h timeout; the token lives only
-in the server-side session and is handed to JGit in memory. CSRF is on for every mutating request,
-**the login included**: `GET /api/session/csrf` → send the token as `X-CSRF-TOKEN`. Re-fetch it
-after login and after logout. Unauthenticated API calls answer `401` as a problem, never a redirect.
+Session cookie `HttpOnly; Secure; SameSite=Lax`, never persisted, 8 h timeout (a session nobody
+has logged in to: `editor.limits.pre-login-session-timeout`, 15 min); the token lives only in the
+server-side session and is handed to JGit in memory. CSRF is on for every mutating request, **the
+login included**: `GET /api/session/csrf` → send the token as `X-CSRF-TOKEN`. The login rotates
+both the session id and the CSRF token: re-fetch it after login and after logout. Unauthenticated
+API calls answer `401` as a problem, never a redirect — the read endpoints, the buffer-in POSTs
+included, are decided by the security chain before a body is read.
 
-⚠ A plain-HTTP developer run must relax the cookie flag or the browser never sends it back:
-`--server.servlet.session.cookie.secure=false`.
+⚠ **HTTPS.** The forge token lives in the session, so the cookie stays `Secure`: serve the editor
+through a TLS-terminating proxy (which also sets HSTS). Plain HTTP to anything but `localhost` is
+**not supported** — Chrome and Firefox send a `Secure` cookie to `http://localhost`, so a local
+developer run works as it is. Trial opt-out ONLY, for a throw-away instance:
+`--server.servlet.session.cookie.secure=false` (compose: `COOKIE_SECURE=false`).
 
 ## The API
 
@@ -129,13 +157,17 @@ the served document drifts from the file — regenerate with
 | `GET /api/scenarios?rule=` | a rule id | `{branch, head, rule, family, suite{directory, scenarios[{name, path, coreId?, expect?, domain?, expectViolationCount?, expectViolationAtCount, datasets, sidecars, parseError?, size}], otherFiles}}` | 400, 401 |
 | `GET /api/related?rule=` | a rule id | `{branch, head, rule, related[{coreId, relation, via, family, path, exists}]}` — shared authority references across families; the equivalence / relation classes and minted parentage where the branch carries the registers (§5.5) | 400, 401 |
 | `POST /api/cdt/parse` | `{content}` | `{datasets[{name, label?, attrs, fence, columns[{name, type, label?, length?, format?, codelist?, attrs}], rows[][]}], directives[{line, name, text}], error?}` — cells in the parser's field encoding: an unquoted missing sentinel (`.`, `._`, `.A`…`.Z`) bare, a literal that looks like one backslash-escaped, text otherwise | 401, 413 |
-| `POST /api/cdt/splice` | `{content, dataset}` — one block rewritten by the grid | `{content}` — only that block's `col` lines and rows change (comments between its rows are dropped) | 400 `CDT_UNREPRESENTABLE` (the engine's message), 401, 413 |
-| `POST /api/cdt/expectations` | `{content, lines}` — the confirmed `#expectViolation*` lines | `{content}` — the old lines replaced at the canonical position | 400, 401, 413 |
-| `POST /api/run` | `{path, content, docs?, scenarioPath, scenarioContent}` — the rule buffer and the scenario buffer (saved or not) | `{branch, head, report{outcome: PASS\|FAIL\|ABORTED, code, detail, scopeGate, evaluation?, skip?, verdict?, locations?, results[], findings[{ruleId, row, usubjid?, seq?, keys, values, level?, unit, groupKey, namedColumns, message?}], reportJson? (the v2 report document), expectations?{count, ats, lines}, ruleDiagnostics, durationMs, worker: child\|inline}}` — codes beyond the engine's: `RULE_ERRORS`, `PARKED`, `PARSE`, `TIMEOUT`, `WORKER_FAILED` | 400 `BAD_PATH`, 401, 413 `TOO_LARGE`, 429 `RATE_LIMITED` (anonymous), 503 `RUN_BUSY` |
+| `POST /api/cdt/splice` | `{content, dataset, index?}` — one block rewritten by the grid, addressed by its position in `parse`'s `datasets` (else the first block of `dataset.name`) | `{content}` — only that block's `col` lines and rows change (comments between its rows are dropped) | 400 `CDT_UNREPRESENTABLE` (the engine's message), 401, 413 |
+| `POST /api/cdt/expectations` | `{content, lines, expect?}` — the confirmed `#expectViolation*` lines (required; `[]` clears them) and, for a run's proposal, its `expect` (`violation` \| `noViolation`) | `{content}` — the old lines replaced at the canonical position; with `expect`, the `#test` line's `expect=` set to it (and `#expect-execution-error` / `#expect-abort`, which only another verdict admits, dropped) | 400, 401, 413 |
+| `POST /api/run` | `{path, content, docs?, scenarioPath, scenarioContent}` — the rule buffer and the scenario buffer (saved or not) | `{branch, head, path, scenarioPath, report{outcome: PASS\|FAIL\|ABORTED, code, detail, scopeGate, evaluation?, skip?, verdict?, locations?, results[], findings[{ruleId, row, usubjid?, seq?, keys, values, level?, unit, groupKey, namedColumns, message?}] (maps in the engine's order), reportJson? (the v2 report document), expectations?{count, ats, lines, expect, testLine}, ruleDiagnostics, durationMs, worker: child\|inline}}` — `path` / `scenarioPath` name what ran, so *take actual as expected* binds to the run's scenario; `expectations` proposes `expect=violation` with the lines when the rule fired, `expect=noViolation` with none when nothing fired on a scenario that expected a violation, and `testLine` is the rewritten `#test` line; codes beyond the engine's: `RULE_ERRORS`, `PARKED`, `PARSE`, `TIMEOUT`, `WORKER_FAILED`, `TOO_LARGE` (the report exceeded `editor.run.max-report-bytes`) | 400 `BAD_PATH`, 401, 409 `RUN_IN_PROGRESS` (one run at a time per user / anonymous client), 413 `TOO_LARGE`, 429 `RATE_LIMITED` (anonymous), 503 `RUN_BUSY`, 503 `WORKSPACE_BUSY` |
 
 The read endpoints (`files`, `explorer`, `search`, `scenarios`, `related`, `engine/*`, and the
 buffer-in / answer-out POSTs `analyse`, `cdt/*`, `run`) serve the session's working tree, else
-the anonymous snapshot when it is on, else `401 UNAUTHENTICATED`. Content is UTF-8 text; `blob`
+the anonymous snapshot when it is on, else `401 UNAUTHENTICATED` — decided by the security chain
+before the body is read. Every problem carries a `code`, Spring MVC's own included (`BAD_REQUEST`
+for an unreadable body or a mistyped parameter, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, …; `INTERNAL`
+and `IO_FAILED` with a generic text — the log has the details); `GET /api/engine/schema` answers
+`422 SCHEMA_INVALID` when the branch's schema file is not JSON. Content is UTF-8 text; `blob`
 is the git blob id of the content. `GET /api/info` carries `engine{version, languageLevel,
 storeAvailable, storeFormat, storeReason, runTimeoutSeconds, maxBufferBytes}` and
 `GET /api/explorer` the branch's `rules-src/LANGUAGE-LEVEL` (`languageLevel`, null when the
@@ -152,7 +184,11 @@ branch declares none): the SPA's engine-version banner compares the two (O13).
   by `RuleTestCdt`'s own writer; `CdtDocument` splices the grid. Nothing here re-implements a
   verdict. ⚠ The engine derives `Sensitivity` before it knows a rule is parked, so a parked
   rule can carry a `SENSITIVITY_UNDERIVABLE` the gate never raises: the editor drops it
-  (`RuleAnalyser`, PLAN-rule-editor §12) until the one-line engine fix lands.
+  (`RuleAnalyser`, PLAN-rule-editor §12) until the one-line engine fix lands. A parked rule is
+  never loaded, yet its derived fields, references and scope universe come from the same check
+  read without its `Executability` (the engine's reading), its `Authorities` from the parked
+  canonical node. A class variable (`--ENDTC`) lists the concrete ones (`AEENDTC`) whose prefix
+  is an in-scope dataset.
 - **The metadata store** (`editor.metadata-store`, else `CDISC_METADATA_STORE`, else
   `-Dcdisc.metadata.store`) is opened once at startup and shared read-only; the run workers get
   its path. ⛔ CDISC Library content comes only from it — the editor never seeds, never reads the
@@ -162,9 +198,16 @@ branch declares none): the SPA's engine-version banner compares the two (O13).
 - **Runs are child JVM workers** (§5.8.5): `RunWorker` reads the job on stdin and writes the
   report on stdout; `-Xmx editor.run.max-heap`, `-XX:+ExitOnOutOfMemoryError`, killed past
   `editor.run.timeout` (`ABORTED TIMEOUT`); at most `editor.run.max-concurrent` at once and
-  `editor.run.max-queued` waiting up to `editor.run.queue-wait` (`503 RUN_BUSY`); anonymous
-  clients `editor.run.anonymous-runs-per-minute` (`429 RATE_LIMITED`); analysed and run buffers
-  above `editor.limits.max-buffer-bytes` answer `413 TOO_LARGE`. The worker's class path is
+  `editor.run.max-queued` waiting up to `editor.run.queue-wait` (`503 RUN_BUSY`); one run at a
+  time per user or anonymous client (`409 RUN_IN_PROGRESS`); anonymous clients
+  `editor.run.anonymous-runs-per-minute` (`429 RATE_LIMITED`) and a pool of their own
+  (`anonymous-max-concurrent` 1, `anonymous-max-queued` 2, `anonymous-timeout` 20 s) — never an
+  author's worker; a report above `editor.run.max-report-bytes` kills the worker (`ABORTED
+  TOO_LARGE`); analysed and run buffers above `editor.limits.max-buffer-bytes` answer
+  `413 TOO_LARGE`. The job is fed from a thread of its own, so the timeout counts from the
+  worker's start; the worker inherits only `PATH`, the temp, locale and time-zone variables, and
+  halts itself when the server that started it is gone or it outlived the timeout by 15 s. ⚠ It
+  runs under the server's uid (a separate uid would isolate more; not done). The worker's class path is
   `editor.run.classpath`, else the bundle's `lib/*` under the launcher (`bootstrap.dir`), else
   this JVM's. A run never touches the workspace: the scenario's suite directory (its sidecars)
   is exported into a scratch tree under `<workspace-root>/.runs/`, the buffer is written where
@@ -173,7 +216,10 @@ branch declares none): the SPA's engine-version banner compares the two (O13).
   end to end). A read-only user and an anonymous reader run exactly like a writer (O12).
 - **The semantic search index** assembles every check of the view once (3 461 rules in
   1.7–3.2 s measured 2026-10-06), cached per HEAD + the content hash of the uncommitted check,
-  docs and scenario files; the related-rules `CorpusIndex` comes from the same build.
+  docs and scenario files; the related-rules `CorpusIndex` comes from the same build. One build
+  per view however many requests ask (single-flight), OUTSIDE the workspace lock (the HEAD
+  snapshot with the changed files laid over it), and incremental: with an index of the same HEAD
+  cached, only the rules whose files changed are assembled again.
 - **Jackson:** the engine speaks Jackson 2, Spring Boot 4 speaks Jackson 3; nodes cross by text
   (`engine/Json`), never by reference.
 
@@ -196,8 +242,11 @@ A developer run straight from the build output, after `mvn package`:
 ```bash
 java -cp "target/classes:target/libs/*" net.cumba.corej.editor.RuleEditorApplication \
     --editor.repository.url=https://github.com/cumba-oss/cumba-oss-corej-rules.git \
-    --editor.workspace-root=./workspaces --server.servlet.session.cookie.secure=false
+    --editor.workspace-root=./workspaces
 ```
+
+(Browse it at `http://localhost:…`: the `Secure` cookie travels to `localhost` over plain HTTP in
+Chrome and Firefox. A forge without TLS needs `--editor.repository.allow-http=true`.)
 
 Configuration keys and their meaning: [`src/main/resources/application.yaml`](src/main/resources/application.yaml).
 
@@ -235,7 +284,13 @@ own. No corpus directory is shipped: the rules come from git, per user.
    ⚠ Written without docker available: shape-checked, not run. The metadata store is a FILE
    seeded separately at the engine's store format (5), placed in the `metadata-store` volume as
    `metadata-store.zip` — see the compose file's header; the run workers' memory is
-   `EDITOR_RUN_MAX_HEAP` × `EDITOR_RUN_MAX_CONCURRENT` on top of `JAVA_OPTS`.
+   `EDITOR_RUN_MAX_HEAP` × `EDITOR_RUN_MAX_CONCURRENT` on top of `JAVA_OPTS`. Secure by default
+   (security review M3): the nginx port is published on `127.0.0.1` only and the cookie is
+   `Secure` — put a TLS-terminating proxy in front to serve other machines; `COOKIE_SECURE=false`
+   is a trial opt-out for a throw-away instance only. `EDITOR_TRUSTED_PROXIES` (the private
+   ranges by default — only nginx reaches the API) makes the per-client limits count clients, not
+   nginx. The SPA's nginx must accept bodies up to `editor.limits.max-request-bytes` (4 MiB by
+   default).
 
 ### The smoke test
 

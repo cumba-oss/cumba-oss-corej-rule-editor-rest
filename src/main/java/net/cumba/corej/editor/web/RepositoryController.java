@@ -28,7 +28,15 @@ import org.springframework.web.bind.annotation.RestController;
  * The workspace's git surface (§5.2): status, branches, create / switch / delete, commit, discard,
  * push, update from default and from the remote branch. Every mutating endpoint checks the mode
  * (403 {@code READ_ONLY}) and the client's {@code {branch, head}} (409 {@code STALE}) before
- * acting.
+ * acting; every branch name is checked as a ref name before JGit sees it (400 {@code BAD_REQUEST},
+ * security review L6).
+ *
+ * <p>
+ * ⚠ {@code GET /api/branches?fetch=true} has a side effect, accepted on purpose (security review
+ * INFO): it only refreshes the remote-tracking refs with the user's own token — no write, no merge
+ * — so a cross-site top-level navigation that triggers it (a {@code SameSite=Lax} cookie is sent on
+ * one) changes nothing the user owns.
+ * </p>
  */
 @RestController
 @RequestMapping("/api")

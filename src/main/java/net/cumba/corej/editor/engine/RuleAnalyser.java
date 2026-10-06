@@ -2,6 +2,7 @@ package net.cumba.corej.editor.engine;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +33,14 @@ import org.springframework.stereotype.Component;
  * drops parked rules first — so a parked rule can carry a {@code SENSITIVITY_UNDERIVABLE} error the
  * gate never raises (PLAN-rule-editor §12, left for phase 3). Until the one-line engine fix lands,
  * the editor drops that diagnostic on a parked rule here, in one place.
+ * </p>
+ *
+ * <p>
+ * A parked rule is never loaded, so the assembler gives it no {@code Rule} — yet its author edits
+ * it (REST review #8). The derived fields, the referenced variables and the scope universe then
+ * come from the same check assembled without its {@code Executability} (the engine's own reading,
+ * never a re-implementation of the scope), the {@code Authorities} from the parked rule's canonical
+ * node; its diagnostics stay the parked assembly's.
  * </p>
  */
 @Component
@@ -80,7 +89,23 @@ public class RuleAnalyser
                 : standards.forCheck(aSource, check);
         AssembledRule assembled = AuthoredRuleAssembler.assemble(aCheckText, docs,
                 packageStandards);
-        return toAnalysis(assembled, check);
+        Rule insight = assembled.rule();
+        if (insight == null && assembled.parked() && check instanceof ObjectNode object)
+        {
+            insight = unparked(object, docs, packageStandards);
+        }
+        return toAnalysis(assembled, check, insight);
+    }
+
+
+    /** The rule a parked check would load as: the check without its {@code Executability}. */
+    static @Nullable Rule unparked(ObjectNode aCheck, @Nullable String aDocs,
+            List<StandardRef> aPackageStandards)
+    {
+        ObjectNode live = aCheck.deepCopy();
+        live.remove("Executability");
+        // JSON is YAML: the assembler reads the node's text as it reads the buffer
+        return AuthoredRuleAssembler.assemble(live.toString(), aDocs, aPackageStandards).rule();
     }
 
 
@@ -119,8 +144,20 @@ public class RuleAnalyser
     }
 
 
-    @SuppressWarnings("PMD.CloseResource") // the store is shared, owned and closed by EngineStore
     Analysis toAnalysis(AssembledRule aAssembled, @Nullable JsonNode aCheck)
+    {
+        return toAnalysis(aAssembled, aCheck, aAssembled.rule());
+    }
+
+
+    /**
+     * @param aInsight
+     *            the rule the derived fields, references and scope are read from: the assembled
+     *            one, or for a parked rule its {@link #unparked} reading (null when neither loads)
+     */
+    @SuppressWarnings("PMD.CloseResource") // the store is shared, owned and closed by EngineStore
+    Analysis toAnalysis(AssembledRule aAssembled, @Nullable JsonNode aCheck,
+            @Nullable Rule aInsight)
     {
         List<Analysis.Diagnostic> diagnostics = new ArrayList<>();
         for (RuleDiagnostic d : aAssembled.diagnostics())
@@ -131,10 +168,13 @@ public class RuleAnalyser
             }
             diagnostics.add(toDiagnostic(d));
         }
-        Rule rule = aAssembled.rule();
+        Rule rule = aInsight;
         List<String> products = aCheck == null ? List.of()
                 : RuleInsight.productKeysOf(AuthoredRuleAssembler.standardsOf(aCheck));
-        Analysis.Derived derived = null;
+        JsonNode canonical = aAssembled.canonicalNode();
+        Analysis.Derived derived = rule == null && aAssembled.parked() && canonical != null
+                ? parkedDerived(canonical)
+                : null;
         Analysis.Scope scope = Analysis.Scope.empty(products);
         List<Analysis.VariableRef> refs = new ArrayList<>();
         if (rule != null)
@@ -151,9 +191,21 @@ public class RuleAnalyser
                 scope = toScope(open, universe, products);
             }
         }
-        return new Analysis(aAssembled.coreId(), rule != null, aAssembled.parked(), diagnostics,
-                derived, scope, refs, bindingsOf(aCheck), requiredVariablesOf(aCheck),
+        return new Analysis(aAssembled.coreId(), aAssembled.rule() != null, aAssembled.parked(),
+                diagnostics, derived, scope, refs, bindingsOf(aCheck), requiredVariablesOf(aCheck),
                 store.available());
+    }
+
+
+    /** A parked rule whose check does not load even unparked: the authorities, nothing derived. */
+    static Analysis.Derived parkedDerived(JsonNode aCanonical)
+    {
+        JsonNode authorities = aCanonical.get("Authorities");
+        return new Analysis.Derived(null, "NONE",
+                "the rule is parked and its check does not load: nothing is derived",
+                new Analysis.OutputVariables(List.of(), List.of(), List.of(), false),
+                authorities == null || authorities.isNull() ? null : Json.toJackson3(authorities),
+                null, List.of());
     }
 
 

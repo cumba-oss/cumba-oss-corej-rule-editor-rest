@@ -1,5 +1,6 @@
 package net.cumba.corej.editor.engine;
 
+import java.io.InputStream;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -40,5 +41,19 @@ public final class Json
     public static <T> T read(String aJson, Class<T> aType)
     {
         return JSON3.readValue(aJson, aType);
+    }
+
+
+    /** Reads from a stream (a worker's report, without an intermediate String copy). */
+    public static <T> T read(InputStream aJson, Class<T> aType)
+    {
+        return JSON3.readValue(aJson, aType);
+    }
+
+
+    /** The value as UTF-8 JSON bytes (a worker's job, written straight to its stdin). */
+    public static byte[] writeBytes(Object aValue)
+    {
+        return JSON3.writeValueAsBytes(aValue);
     }
 }

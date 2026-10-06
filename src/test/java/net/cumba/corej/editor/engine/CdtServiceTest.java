@@ -148,4 +148,106 @@ class CdtServiceTest
         assertEquals(List.of(), p.datasets());
         assertEquals(1, p.directives().size());
     }
+
+    static final String TWO_AE = """
+            #!RuleTest
+            #test X expect=violation domain=AE
+            dataset AE
+            col A type=Char
+            ---
+            first
+            ---
+            # between the blocks
+            dataset AE
+            col A type=Char
+            ---
+            second
+            ---
+            """;
+
+    @Test
+    void aSpliceAddressesItsBlockByIndex()
+    {
+        // REST review #6: by name, the edit of the SECOND AE block overwrote the first
+        CdtService.Parsed p = CdtService.parse(TWO_AE);
+        assertEquals(2, p.datasets().size());
+        CdtService.Dataset second = p.datasets().get(1);
+        CdtService.Dataset edited = new CdtService.Dataset(second.name(), second.label(),
+                second.attrs(), second.fence(), second.columns(),
+                List.of(List.of("second"), List.of("added")));
+        String out = CdtService.splice(TWO_AE, edited, 1);
+        assertEquals(TWO_AE.replace("second\n---\n", "second\nadded\n---\n"), out,
+                "the second block changed, every other byte kept");
+        CdtService.Parsed back = CdtService.parse(out);
+        assertEquals(List.of(List.of("first")), back.datasets().get(0).rows());
+        assertEquals(List.of(List.of("second"), List.of("added")), back.datasets().get(1).rows());
+        // the control: by name the FIRST block is the one rewritten
+        String byName = CdtService.splice(TWO_AE, edited);
+        assertEquals(List.of(List.of("second"), List.of("added")),
+                CdtService.parse(byName).datasets().get(0).rows());
+        // an index past the blocks, or naming another dataset, is refused
+        assertEquals("CDT_UNREPRESENTABLE",
+                assertThrows(EditorException.class, () -> CdtService.splice(TWO_AE, edited, 2))
+                        .code());
+        CdtService.Dataset dm = new CdtService.Dataset("DM", null, Map.of(), second.fence(),
+                second.columns(), List.of(List.of("x")));
+        assertEquals("CDT_UNREPRESENTABLE",
+                assertThrows(EditorException.class, () -> CdtService.splice(TWO_AE, dm, 0)).code());
+    }
+
+
+    @Test
+    void takingActualAsExpectedRewritesTheVerdictOnTheTestLine()
+    {
+        // REST review #2: the verdict moves with the proposal, and what only the old verdict
+        // admits goes with it
+        String error = """
+                #!RuleTest
+                #test X  expect=executionError   domain=AE # keep
+                #expect-execution-error "boom"
+                #expectViolationCount 0
+                dataset AE
+                col A type=Char
+                ---
+                x
+                ---
+                """;
+        String out = CdtService.withExpectations(error,
+                List.of("#expectViolationCount 1", "#expectViolationAt row=1 A=x"), "violation");
+        assertTrue(out.startsWith("""
+                #!RuleTest
+                #test X  expect=violation   domain=AE # keep
+                #expectViolationCount 1
+                #expectViolationAt row=1 A=x
+                dataset AE
+                """), out);
+        assertFalse(out.contains("#expect-execution-error"), out);
+        assertEquals("#test X  expect=violation   domain=AE # keep",
+                CdtService.testLineWith(error, "violation"));
+        // noViolation clears; a location expectation beside it is refused
+        String cleared = CdtService.withExpectations(RemoteRepo.SCENARIO_B_INVALID_TEXT, List.of(),
+                "noViolation");
+        assertTrue(cleared.startsWith(
+                "#!RuleTest\n#test CDISC-CG0270 expect=noViolation " + "domain=AE\ndataset AE"),
+                cleared);
+        assertEquals("BAD_REQUEST",
+                assertThrows(EditorException.class,
+                        () -> CdtService.withExpectations(RemoteRepo.SCENARIO_B_INVALID_TEXT,
+                                List.of("#expectViolationAt row=1 A=x"), "noViolation")).code());
+        assertEquals("BAD_REQUEST",
+                assertThrows(EditorException.class, () -> CdtService
+                        .withExpectations(RemoteRepo.SCENARIO_B_INVALID_TEXT, List.of(), "skipped"))
+                                .code(),
+                "only the verdicts a run proposes");
+        assertEquals("BAD_REQUEST",
+                assertThrows(EditorException.class,
+                        () -> CdtService.withExpectations(
+                                "dataset AE\ncol A type=Char\n---\nx\n---\n", List.of(),
+                                "violation")).code(),
+                "no #test line to rewrite");
+        assertNull(CdtService.testLineWith("dataset AE\n", "violation"));
+        // a line without the token gets one; CRLF and the terminator are kept
+        assertEquals("#test X domain=AE expect=noViolation\r\n",
+                CdtService.rewriteExpect("#test X domain=AE\r\n", "noViolation"));
+    }
 }

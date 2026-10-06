@@ -97,7 +97,7 @@ class GitHubClientTest
     void repositoryAndProbesMatchTheGiteaShape()
     {
         RepositoryCoordinates repo = RepositoryCoordinates
-                .parse(server.baseUrl() + "/acme/rules.git");
+                .parse(server.baseUrl() + "/acme/rules.git", true, false);
         server.on("/repos/acme/rules", 200, "{\"default_branch\":\"main\",\"private\":false,"
                 + "\"permissions\":{\"admin\":true,\"push\":true,\"pull\":true}}");
         RepositoryAccess a = client.repository(CREDS, repo);

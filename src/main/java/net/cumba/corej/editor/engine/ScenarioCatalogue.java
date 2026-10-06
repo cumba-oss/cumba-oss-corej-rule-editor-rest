@@ -145,7 +145,15 @@ public final class ScenarioCatalogue
         Matcher c = COUNT.matcher(aText);
         if (c.find())
         {
-            count = Integer.valueOf(c.group(1));
+            try
+            {
+                count = Integer.valueOf(c.group(1));
+            }
+            catch (NumberFormatException e)
+            {
+                // a count past int is no count the engine reads either (REST review #9: was a 500)
+                count = null;
+            }
         }
         int ats = 0;
         Matcher at = AT.matcher(aText);
@@ -162,7 +170,7 @@ public final class ScenarioCatalogue
                 datasets.add(block.name());
             }
         }
-        catch (CdtParseException | IllegalArgumentException e)
+        catch (CdtParseException | IllegalArgumentException | IllegalStateException e)
         {
             parseError = String.valueOf(e.getMessage());
         }

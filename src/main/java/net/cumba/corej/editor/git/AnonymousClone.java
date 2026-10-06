@@ -46,6 +46,8 @@ public class AnonymousClone
 
     private final ForgeClient forge;
 
+    private final int gitTimeoutSeconds;
+
     private volatile boolean enabled;
 
     private volatile @Nullable Git git;
@@ -64,6 +66,7 @@ public class AnonymousClone
         configuredDefaultBranch = aProperties.getRepository().configuredDefaultBranch();
         dir = aProperties.workspaceRootPath().resolve(DIR);
         forge = aForge;
+        gitTimeoutSeconds = WorkspaceService.timeoutSeconds(aProperties);
     }
 
 
@@ -131,7 +134,7 @@ public class AnonymousClone
             g.fetch().setRemote(Workspace.ORIGIN)
                     .setRefSpecs(new RefSpec(
                             "+" + Constants.R_HEADS + branch + ":" + Constants.R_HEADS + branch))
-                    .call();
+                    .setTimeout(gitTimeoutSeconds).call();
             ObjectId commit = g.getRepository().resolve(Constants.R_HEADS + branch);
             if (commit == null)
             {
@@ -179,7 +182,8 @@ public class AnonymousClone
         {
             return configuredDefaultBranch.get();
         }
-        Map<String, Ref> refs = aGit.lsRemote().setRemote(Workspace.ORIGIN).callAsMap();
+        Map<String, Ref> refs = aGit.lsRemote().setRemote(Workspace.ORIGIN)
+                .setTimeout(gitTimeoutSeconds).callAsMap();
         Ref head = refs.get(Constants.HEAD);
         if (head != null && head.isSymbolic()
                 && head.getTarget().getName().startsWith(Constants.R_HEADS))

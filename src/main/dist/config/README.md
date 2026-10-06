@@ -19,6 +19,11 @@ to a directory **without** one.
 applies its `[properties]` with an unconditional `System.setProperty` and overwrites it.
 
 What belongs here: the bound repository and forge (`editor.repository.url`, `editor.forge.*`),
-the workspace root, the port, the session cookie flags (`secure: false` for plain HTTP, `domain`
-for sibling subdomains) and the CORS allow-list (`editor.cors.allowed-origins`). The packaged
-`application.yaml` documents every key.
+the workspace root, the port, the session cookie's `domain` (sibling subdomains), the CORS
+allow-list (`editor.cors.allowed-origins`) and the reverse proxies whose `X-Forwarded-For` the
+per-client limits believe (`editor.trusted-proxies`). The packaged `application.yaml` documents
+every key.
+
+⚠ The session cookie is `Secure` and stays so: serve HTTPS (a TLS-terminating proxy). Plain HTTP
+to anything but `localhost` is not supported; `server.servlet.session.cookie.secure: false` is a
+trial opt-out for a throw-away instance only — the forge token lives in that session.

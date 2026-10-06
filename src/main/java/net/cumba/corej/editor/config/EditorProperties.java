@@ -41,6 +41,8 @@ public class EditorProperties
 
     private final Limits limits = new Limits();
 
+    private List<String> trustedProxies = List.of();
+
     public Repository getRepository()
     {
         return repository;
@@ -112,6 +114,24 @@ public class EditorProperties
     }
 
 
+    /**
+     * {@code editor.trusted-proxies}: the reverse proxies (addresses or CIDR blocks) whose
+     * {@code X-Forwarded-For} is believed when a per-client limit keys a request (anonymous runs
+     * and searches, logins — security review M4). Empty, the default: the TCP peer is the client,
+     * so behind a proxy every client shares the proxy's key.
+     */
+    public List<String> getTrustedProxies()
+    {
+        return List.copyOf(trustedProxies);
+    }
+
+
+    public void setTrustedProxies(List<String> aTrustedProxies)
+    {
+        trustedProxies = List.copyOf(aTrustedProxies);
+    }
+
+
     /** The workspace root as an absolute path. */
     public Path workspaceRootPath()
     {
@@ -119,10 +139,22 @@ public class EditorProperties
     }
 
 
-    /** The bound repository, parsed; fails loudly on a missing or malformed URL. */
+    /**
+     * The bound repository, parsed; fails loudly on a missing or malformed URL, and on a transport
+     * the installation did not allow (security review L3: {@code https} only, unless
+     * {@code allow-http} / {@code allow-file}).
+     */
     public RepositoryCoordinates coordinates()
     {
-        return RepositoryCoordinates.parse(repository.getUrl());
+        return RepositoryCoordinates.parse(repository.getUrl(), repository.isAllowHttp(),
+                repository.isAllowFile());
+    }
+
+
+    /** The forge API base, checked like the repository URL (security review L3). */
+    public String forgeApiUrl()
+    {
+        return RepositoryCoordinates.checkApiUrl(forge.getApiUrl(), repository.isAllowHttp());
     }
 
     /** {@code editor.repository.*}. */
@@ -132,6 +164,10 @@ public class EditorProperties
         private String url = "";
 
         private @Nullable String defaultBranch;
+
+        private boolean allowHttp;
+
+        private boolean allowFile;
 
         public String getUrl()
         {
@@ -162,6 +198,36 @@ public class EditorProperties
         {
             String b = defaultBranch;
             return b == null || b.isBlank() ? Optional.empty() : Optional.of(b.strip());
+        }
+
+
+        /**
+         * {@code editor.repository.allow-http}: a developer run against a forge without TLS may use
+         * {@code http://} for the repository and the forge API. Off by default: the login token
+         * travels in every git request.
+         */
+        public boolean isAllowHttp()
+        {
+            return allowHttp;
+        }
+
+
+        public void setAllowHttp(boolean aAllowHttp)
+        {
+            allowHttp = aAllowHttp;
+        }
+
+
+        /** {@code editor.repository.allow-file}: a {@code file://} repository — tests only. */
+        public boolean isAllowFile()
+        {
+            return allowFile;
+        }
+
+
+        public void setAllowFile(boolean aAllowFile)
+        {
+            allowFile = aAllowFile;
         }
     }
 
@@ -207,6 +273,10 @@ public class EditorProperties
 
         private Duration retentionInterval = Duration.ofHours(6);
 
+        private @Nullable String hooksDir;
+
+        private Duration gitTimeout = Duration.ofSeconds(60);
+
         public int getRetentionDays()
         {
             return retentionDays;
@@ -228,6 +298,41 @@ public class EditorProperties
         public void setRetentionInterval(Duration aRetentionInterval)
         {
             retentionInterval = aRetentionInterval;
+        }
+
+
+        /**
+         * {@code editor.workspace.hooks-dir}: the EMPTY directory every clone's
+         * {@code core.hooksPath} names (§5.8.3); blank = {@code <workspace-root>/.hooks-disabled}.
+         * A container points it at a root-owned, read-only directory of the image (security review
+         * L4), so the service user cannot plant a hook there either.
+         */
+        public @Nullable String getHooksDir()
+        {
+            return hooksDir;
+        }
+
+
+        public void setHooksDir(@Nullable String aHooksDir)
+        {
+            hooksDir = aHooksDir;
+        }
+
+
+        /**
+         * {@code editor.workspace.git-timeout}: the transport timeout of every clone, fetch, push
+         * and ls-remote (security review L11) — a remote that accepts and never answers no longer
+         * parks a request thread (and the workspace lock) for ever.
+         */
+        public Duration getGitTimeout()
+        {
+            return gitTimeout;
+        }
+
+
+        public void setGitTimeout(Duration aGitTimeout)
+        {
+            gitTimeout = aGitTimeout;
         }
     }
 
@@ -265,6 +370,10 @@ public class EditorProperties
 
         private Duration refreshInterval = Duration.ofMinutes(10);
 
+        private int searchesPerMinute = 30;
+
+        private int maxSearchResults = 50;
+
         public boolean isEnabled()
         {
             return enabled;
@@ -286,6 +395,35 @@ public class EditorProperties
         public void setRefreshInterval(Duration aRefreshInterval)
         {
             refreshInterval = aRefreshInterval;
+        }
+
+
+        /**
+         * Anonymous searches per minute per client (security review L12); beyond that
+         * {@code 429 RATE_LIMITED}. 0 disables the limit.
+         */
+        public int getSearchesPerMinute()
+        {
+            return searchesPerMinute;
+        }
+
+
+        public void setSearchesPerMinute(int aSearchesPerMinute)
+        {
+            searchesPerMinute = aSearchesPerMinute;
+        }
+
+
+        /** The {@code limit} an anonymous search is capped at (security review L12). */
+        public int getMaxSearchResults()
+        {
+            return maxSearchResults;
+        }
+
+
+        public void setMaxSearchResults(int aMaxSearchResults)
+        {
+            maxSearchResults = aMaxSearchResults;
         }
     }
 
@@ -315,6 +453,14 @@ public class EditorProperties
         private @Nullable String javaCommand;
 
         private int workerLogBytes = 16 * 1024;
+
+        private int maxReportBytes = 32 * 1024 * 1024;
+
+        private int anonymousMaxConcurrent = 1;
+
+        private int anonymousMaxQueued = 2;
+
+        private Duration anonymousTimeout = Duration.ofSeconds(20);
 
         public String getMaxHeap()
         {
@@ -427,14 +573,84 @@ public class EditorProperties
         {
             workerLogBytes = aWorkerLogBytes;
         }
+
+
+        /**
+         * The largest report a worker may answer (security review M5); a worker writing more is
+         * killed and the run is {@code ABORTED TOO_LARGE}.
+         */
+        public int getMaxReportBytes()
+        {
+            return maxReportBytes;
+        }
+
+
+        public void setMaxReportBytes(int aMaxReportBytes)
+        {
+            maxReportBytes = aMaxReportBytes;
+        }
+
+
+        /**
+         * Anonymous runs have a pool of their own (security review M4): this many workers, beside —
+         * never taken from — {@code max-concurrent}.
+         */
+        public int getAnonymousMaxConcurrent()
+        {
+            return anonymousMaxConcurrent;
+        }
+
+
+        public void setAnonymousMaxConcurrent(int aAnonymousMaxConcurrent)
+        {
+            anonymousMaxConcurrent = aAnonymousMaxConcurrent;
+        }
+
+
+        /** Anonymous runs waiting for the anonymous pool; beyond that {@code 503 RUN_BUSY}. */
+        public int getAnonymousMaxQueued()
+        {
+            return anonymousMaxQueued;
+        }
+
+
+        public void setAnonymousMaxQueued(int aAnonymousMaxQueued)
+        {
+            anonymousMaxQueued = aAnonymousMaxQueued;
+        }
+
+
+        /** The wall-clock timeout of an anonymous run (shorter than {@code timeout}). */
+        public Duration getAnonymousTimeout()
+        {
+            return anonymousTimeout;
+        }
+
+
+        public void setAnonymousTimeout(Duration aAnonymousTimeout)
+        {
+            anonymousTimeout = aAnonymousTimeout;
+        }
     }
 
 
-    /** {@code editor.limits.*} — the size limits on analysed and run buffers (§5.8.5). */
+    /**
+     * {@code editor.limits.*} — the size limits on analysed and run buffers (§5.8.5) and on request
+     * bodies, the workspace lock wait, the login rate and the pre-login session lifetime (security
+     * review M1, M2, L2, L9).
+     */
     public static class Limits
     {
 
         private int maxBufferBytes = 1024 * 1024;
+
+        private int maxRequestBytes;
+
+        private Duration workspaceLockWait = Duration.ofSeconds(30);
+
+        private int loginsPerMinute = 10;
+
+        private Duration preLoginSessionTimeout = Duration.ofMinutes(15);
 
         public int getMaxBufferBytes()
         {
@@ -445,6 +661,76 @@ public class EditorProperties
         public void setMaxBufferBytes(int aMaxBufferBytes)
         {
             maxBufferBytes = aMaxBufferBytes;
+        }
+
+
+        /** The configured request body limit; 0 (the default) derives it. */
+        public int getMaxRequestBytes()
+        {
+            return maxRequestBytes;
+        }
+
+
+        public void setMaxRequestBytes(int aMaxRequestBytes)
+        {
+            maxRequestBytes = aMaxRequestBytes;
+        }
+
+
+        /**
+         * The request body limit in force (security review M2): the configured one, else four
+         * buffers' worth — a run carries three buffers (rule, docs, scenario), JSON-escaped.
+         */
+        public long effectiveMaxRequestBytes()
+        {
+            return maxRequestBytes > 0 ? maxRequestBytes : 4L * maxBufferBytes;
+        }
+
+
+        /**
+         * How long a request waits for its workspace's lock before it is refused with
+         * {@code 503 WORKSPACE_BUSY} (security review M1): no request parks a thread for ever
+         * behind another one of the same user.
+         */
+        public Duration getWorkspaceLockWait()
+        {
+            return workspaceLockWait;
+        }
+
+
+        public void setWorkspaceLockWait(Duration aWorkspaceLockWait)
+        {
+            workspaceLockWait = aWorkspaceLockWait;
+        }
+
+
+        /** Login attempts per minute per client (security review L9); 0 disables the limit. */
+        public int getLoginsPerMinute()
+        {
+            return loginsPerMinute;
+        }
+
+
+        public void setLoginsPerMinute(int aLoginsPerMinute)
+        {
+            loginsPerMinute = aLoginsPerMinute;
+        }
+
+
+        /**
+         * The lifetime of a session nobody has logged in to yet (the one {@code GET
+         * /api/session/csrf} creates, security review L2); a login raises it to
+         * {@code server.servlet.session.timeout}.
+         */
+        public Duration getPreLoginSessionTimeout()
+        {
+            return preLoginSessionTimeout;
+        }
+
+
+        public void setPreLoginSessionTimeout(Duration aPreLoginSessionTimeout)
+        {
+            preLoginSessionTimeout = aPreLoginSessionTimeout;
         }
     }
 }

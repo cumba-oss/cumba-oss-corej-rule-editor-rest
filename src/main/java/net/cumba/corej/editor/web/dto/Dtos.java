@@ -33,11 +33,21 @@ public final class Dtos
 
     // ---- session -----------------------------------------------------------------------
 
-    /** {@code POST /api/session/login}. */
+    /**
+     * {@code POST /api/session/login}. {@link #toString()} masks the token (security review L1: a
+     * record's own {@code toString} prints every component, and Spring logs request bodies at
+     * DEBUG).
+     */
     public record LoginRequest(
             @Schema(description = "the forge login name", example = "mw") String login,
             @Schema(description = "a personal access token of that login") String token)
     {
+
+        @Override
+        public String toString()
+        {
+            return "LoginRequest[login=" + login + ", token=***]";
+        }
     }
 
 
@@ -312,18 +322,24 @@ public final class Dtos
 
 
     /** {@code POST /api/cdt/splice}: the text and the one dataset block the grid rewrote. */
-    public record CdtSplice(String content, CdtService.Dataset dataset)
+    public record CdtSplice(String content, CdtService.Dataset dataset, @Schema(
+            description = "the block's position in /api/cdt/parse's datasets (0-based); null addresses the first block of dataset.name — send it: a scenario may hold two blocks of one name") @Nullable Integer index)
     {
     }
 
 
-    /** {@code POST /api/cdt/expectations}: the text and the confirmed expectation lines. */
-    public record CdtExpectations(String content, List<String> lines)
+    /**
+     * {@code POST /api/cdt/expectations}: the text, the confirmed expectation lines and — for a
+     * run's proposal — the verdict it sets on the {@code #test} line.
+     */
+    public record CdtExpectations(String content, @Schema(
+            description = "the #expectViolation* lines to write; required ([] clears them)") @Nullable List<String> lines,
+            @Schema(description = "the expect= the #test line gets: the run report's expectations.expect (violation | noViolation); null leaves the verdict") @Nullable String expect)
     {
 
         public CdtExpectations
         {
-            lines = lines == null ? List.of() : List.copyOf(lines);
+            lines = lines == null ? null : List.copyOf(lines);
         }
     }
 
@@ -341,8 +357,15 @@ public final class Dtos
     }
 
 
-    /** The judged run. */
-    public record RunResult(String branch, String head, RunReport report)
+    /**
+     * The judged run, with what it ran: the branch and HEAD of the view and the two paths — so
+     * "take actual as expected" binds to the run's scenario, not to whatever is selected later
+     * (REST review #2).
+     */
+    public record RunResult(String branch, String head,
+            @Schema(description = "the rule's check path the run was asked for") String path,
+            @Schema(description = "the scenario the run judged") String scenarioPath,
+            RunReport report)
     {
     }
 

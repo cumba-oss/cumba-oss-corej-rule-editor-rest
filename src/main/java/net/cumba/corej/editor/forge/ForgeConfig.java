@@ -15,7 +15,8 @@ public class ForgeConfig
     @Bean
     public ForgeClient forgeClient(EditorProperties aProperties)
     {
-        String api = aProperties.getForge().getApiUrl();
+        // checked like the repository URL: https, no credentials in it (security review L3)
+        String api = aProperties.forgeApiUrl();
         return switch (aProperties.getForge().getType())
         {
         case GITEA -> new GiteaClient(api);

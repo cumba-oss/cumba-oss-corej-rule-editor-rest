@@ -1,5 +1,7 @@
 package net.cumba.corej.editor.run;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.cumba.corej.editor.engine.Analysis;
@@ -16,7 +18,8 @@ import org.jspecify.annotations.Nullable;
  * @param code
  *            {@code OK} or the engine's mapping-table code ({@code SCOPE}, {@code VERDICT},
  *            {@code LOCATION}, {@code PARSE}, {@code SIDECAR}, …); the editor adds
- *            {@code RULE_ERRORS}, {@code PARKED}, {@code TIMEOUT}, {@code WORKER_FAILED}
+ *            {@code RULE_ERRORS}, {@code PARKED}, {@code TIMEOUT}, {@code WORKER_FAILED},
+ *            {@code TOO_LARGE} (the worker's report exceeded {@code editor.run.max-report-bytes})
  * @param detail
  *            the message
  * @param scopeGate
@@ -36,7 +39,7 @@ import org.jspecify.annotations.Nullable;
  * @param reportJson
  *            the v2 report document, or {@code null} when nothing executed
  * @param expectations
- *            the proposed {@code #expectViolation*} lines, or {@code null}
+ *            the proposed expectations ("take actual as expected"), or {@code null}
  * @param ruleDiagnostics
  *            the assembler's diagnostics when the rule could not be run ({@code RULE_ERRORS})
  * @param durationMs
@@ -87,7 +90,11 @@ public record RunReport(String outcome, String code, String detail, ScopeGate sc
     }
 
 
-    /** One finding row. */
+    /**
+     * One finding row. The maps keep the engine's order (REST review #3: {@code Map.copyOf}
+     * scrambled keys, values and group key per JVM, twice — once in the worker, once in the
+     * parent); a {@code null} key is dropped, a {@code null} value (a missing value) kept.
+     */
     public record Finding(@Nullable String ruleId, long row, @Nullable String usubjid,
             @Nullable String seq, Map<String, String> keys, Map<String, String> values,
             @Nullable String level, String unit, Map<String, String> groupKey,
@@ -96,16 +103,53 @@ public record RunReport(String outcome, String code, String detail, ScopeGate sc
 
         public Finding
         {
-            keys = Map.copyOf(keys);
-            values = Map.copyOf(values);
-            groupKey = Map.copyOf(groupKey);
-            namedColumns = List.copyOf(namedColumns);
+            keys = Collections.unmodifiableMap(ordered(keys));
+            values = Collections.unmodifiableMap(ordered(values));
+            groupKey = Collections.unmodifiableMap(ordered(groupKey));
+            namedColumns = List.copyOf(namedColumns == null ? List.of()
+                    : namedColumns.stream().filter(java.util.Objects::nonNull).toList());
         }
     }
 
+    /** A copy in the given order, null-safe (no NPE turns a run into a failure). */
+    static Map<String, String> ordered(@Nullable Map<String, String> aMap)
+    {
+        Map<String, String> copy = new LinkedHashMap<>();
+        if (aMap != null)
+        {
+            aMap.forEach((k, v) ->
+            {
+                if (k != null)
+                {
+                    copy.put(k, v);
+                }
+            });
+        }
+        return copy;
+    }
 
-    /** The proposed expectation directives. */
-    public record Expectations(@Nullable Integer count, int ats, List<String> lines)
+    /**
+     * The proposal of "take actual as expected" (§5.6, REST review #2), written only on the user's
+     * confirmation.
+     *
+     * @param count
+     *            the proposed {@code #expectViolationCount}, or {@code null}
+     * @param ats
+     *            how many {@code #expectViolationAt} lines
+     * @param lines
+     *            the proposed {@code #expectViolation*} lines (empty when the proposal clears them)
+     * @param expect
+     *            the {@code expect=} token the proposal sets on the {@code #test} line:
+     *            {@code violation} when the rule fired, {@code noViolation} when nothing fired on a
+     *            scenario that expected a violation
+     * @param testLine
+     *            the scenario's {@code #test} line with that token, exactly as
+     *            {@code POST /api/cdt/expectations} writes it — the confirm diff shows it; equal to
+     *            the current line when the token does not change; {@code null} when the scenario
+     *            has no {@code #test} line
+     */
+    public record Expectations(@Nullable Integer count, int ats, List<String> lines, String expect,
+            @Nullable String testLine)
     {
 
         public Expectations

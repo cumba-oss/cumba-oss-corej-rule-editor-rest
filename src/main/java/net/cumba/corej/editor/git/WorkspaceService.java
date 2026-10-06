@@ -21,8 +21,10 @@ import org.springframework.stereotype.Service;
 /**
  * The workspaces under {@code editor.workspace-root}: one directory per forge user id (§5.1.5,
  * review M1 — never the login), opened on first use and kept open; cloned on first login with the
- * user's own token (§5.1.6). The empty, server-owned {@code .hooks-disabled/} directory every
- * clone's {@code core.hooksPath} points at lives here too (§5.8.3).
+ * user's own token (§5.1.6). The empty, server-owned directory every clone's {@code core.hooksPath}
+ * points at is {@code editor.workspace.hooks-dir}, by default {@code .hooks-disabled/} under the
+ * root (§5.8.3); a container image points it at a root-owned, read-only directory (security review
+ * L4).
  */
 @Service
 public final class WorkspaceService
@@ -36,6 +38,8 @@ public final class WorkspaceService
 
     private final String repositoryUrl;
 
+    private final int gitTimeoutSeconds;
+
     private final Map<Long, Workspace> open = new ConcurrentHashMap<>();
 
     private final Map<Long, Object> creation = new ConcurrentHashMap<>();
@@ -43,16 +47,29 @@ public final class WorkspaceService
     @Autowired
     public WorkspaceService(EditorProperties aProperties) throws IOException
     {
-        this(aProperties.workspaceRootPath(), aProperties.coordinates().url());
+        this(aProperties.workspaceRootPath(), aProperties.coordinates().url(),
+                hooksDirOf(aProperties), timeoutSeconds(aProperties));
     }
 
 
     WorkspaceService(Path aRoot, String aRepositoryUrl) throws IOException
     {
+        this(aRoot, aRepositoryUrl, aRoot.resolve(HOOKS_DIR),
+                Workspace.DEFAULT_GIT_TIMEOUT_SECONDS);
+    }
+
+
+    WorkspaceService(Path aRoot, String aRepositoryUrl, Path aHooksDir, int aGitTimeoutSeconds)
+        throws IOException
+    {
         root = aRoot;
         repositoryUrl = aRepositoryUrl;
-        hooksDir = aRoot.resolve(HOOKS_DIR);
-        Files.createDirectories(hooksDir);
+        hooksDir = aHooksDir;
+        gitTimeoutSeconds = aGitTimeoutSeconds;
+        if (!Files.isDirectory(hooksDir))
+        {
+            Files.createDirectories(hooksDir);
+        }
         try (Stream<Path> stale = Files.list(hooksDir))
         {
             if (stale.findAny().isPresent())
@@ -64,9 +81,33 @@ public final class WorkspaceService
     }
 
 
+    static Path hooksDirOf(EditorProperties aProperties)
+    {
+        String configured = aProperties.getWorkspace().getHooksDir();
+        return configured == null || configured.isBlank()
+                ? aProperties.workspaceRootPath().resolve(HOOKS_DIR)
+                : Path.of(configured.strip()).toAbsolutePath().normalize();
+    }
+
+
+    /** The configured git timeout in JGit's unit (whole seconds, at least one). */
+    static int timeoutSeconds(EditorProperties aProperties)
+    {
+        long seconds = aProperties.getWorkspace().getGitTimeout().toSeconds();
+        return (int) Math.clamp(seconds, 1L, Integer.MAX_VALUE);
+    }
+
+
     public Path root()
     {
         return root;
+    }
+
+
+    /** The transport timeout every workspace of this service uses, in seconds. */
+    public int gitTimeoutSeconds()
+    {
+        return gitTimeoutSeconds;
     }
 
 
@@ -125,9 +166,10 @@ public final class WorkspaceService
         {
             if (Workspace.exists(dir))
             {
-                return Workspace.open(dir, hooksDir);
+                return Workspace.open(dir, hooksDir, gitTimeoutSeconds);
             }
-            return Workspace.create(dir, repositoryUrl, aDefaultBranch, aCredentials, hooksDir);
+            return Workspace.create(dir, repositoryUrl, aDefaultBranch, aCredentials, hooksDir,
+                    gitTimeoutSeconds);
         }
         catch (IOException e)
         {
@@ -185,7 +227,7 @@ public final class WorkspaceService
                 {
                     try
                     {
-                        return Workspace.open(directoryFor(id), hooksDir);
+                        return Workspace.open(directoryFor(id), hooksDir, gitTimeoutSeconds);
                     }
                     catch (IOException e)
                     {
@@ -203,7 +245,11 @@ public final class WorkspaceService
     }
 
 
-    /** Closes and deletes a workspace (retention). */
+    /**
+     * Closes and deletes a workspace (retention). The caller holds the workspace's lock (security
+     * review L10: checked and deleted in one lock hold); a request that obtained the workspace
+     * before and waits for the lock finds it {@link Workspace#isRetired() retired}.
+     */
     @SuppressWarnings("PMD.CloseResource") // this IS the close
     public void delete(long aUserId) throws IOException
     {
@@ -212,6 +258,7 @@ public final class WorkspaceService
             Workspace ws = open.remove(aUserId);
             if (ws != null)
             {
+                ws.retire();
                 ws.close();
             }
             deleteTree(directoryFor(aUserId));

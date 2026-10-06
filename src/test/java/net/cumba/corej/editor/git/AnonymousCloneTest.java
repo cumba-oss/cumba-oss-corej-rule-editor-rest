@@ -43,6 +43,7 @@ class AnonymousCloneTest
         forge.setAnonymouslyReadable(true);
         props = new EditorProperties();
         props.getRepository().setUrl(remote.url());
+        props.getRepository().setAllowFile(true); // the fixture remote is file:// (L3: tests only)
         props.setWorkspaceRoot(tmp.resolve("workspaces").toString());
         props.getAnonymous().setEnabled(true);
     }

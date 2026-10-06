@@ -29,11 +29,20 @@ COPY target/cumba-oss-corej-rule-editor-rest-${VERSION}/cumba-oss-corej-rule-edi
 
 # git is NOT needed: every git operation is JGit, in-process. A non-root user owns the
 # workspaces (one clone per forge user, §5.1.5) and nothing else.
+# The hooks directory every clone's core.hooksPath names (§5.8.3) is part of the IMAGE,
+# owned by root and read-only (security review L4): the service user cannot plant a hook
+# in it, and the server refuses to start if it is not empty.
+# ⚠ The run workers are child JVMs of the SAME uid as the service (a separate uid would be
+# stronger isolation; not done): their limits are the heap cap, the timeout, a minimal
+# environment and the confined export, not the operating system's permissions.
 RUN useradd --system --create-home --home-dir /var/lib/rule-editor rule-editor \
     && mkdir -p /var/lib/rule-editor/workspaces /var/lib/rule-editor/metadata-store \
     && chown -R rule-editor:rule-editor /var/lib/rule-editor \
     && chmod 755 /opt/rule-editor/run.sh \
-    && mkdir -p /etc/rule-editor
+    && mkdir -p /etc/rule-editor \
+    && mkdir -p /opt/rule-editor/hooks-disabled \
+    && chown root:root /opt/rule-editor/hooks-disabled \
+    && chmod 0555 /opt/rule-editor/hooks-disabled
 USER rule-editor
 WORKDIR /var/lib/rule-editor
 
@@ -52,7 +61,12 @@ VOLUME ["/var/lib/rule-editor/workspaces", "/var/lib/rule-editor/metadata-store"
 EXPOSE 8081
 
 ENTRYPOINT ["/opt/rule-editor/run.sh"]
-# Behind the compose's nginx (plain HTTP inside the network, TLS terminated outside) the
-# session cookie must not be Secure-only; a TLS-fronted single container overrides this
-# with --server.servlet.session.cookie.secure=true in its command.
-CMD ["--editor.workspace-root=/var/lib/rule-editor/workspaces", "--server.servlet.session.cookie.secure=false"]
+# ⚠ THE SESSION COOKIE STAYS Secure (security review M3, the packaged default): the forge
+# token lives in the session, so the cookie must never cross plain HTTP. Serve the editor
+# through a TLS-terminating proxy (which also sets HSTS); plain HTTP to anything but
+# localhost is NOT supported. Chrome and Firefox send a Secure cookie to http://localhost,
+# so a trial on the same machine works as it is.
+# Trial opt-out ONLY (a throw-away instance on a trusted network, a browser that refuses
+# Secure cookies on http://localhost): pass --server.servlet.session.cookie.secure=false,
+# or set SERVER_SERVLET_SESSION_COOKIE_SECURE=false (docker-compose.yml: COOKIE_SECURE).
+CMD ["--editor.workspace-root=/var/lib/rule-editor/workspaces", "--editor.workspace.hooks-dir=/opt/rule-editor/hooks-disabled"]

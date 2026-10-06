@@ -21,8 +21,10 @@ import net.cumba.corej.core.report.ReportSections;
 import net.cumba.corej.core.report.json.JsonReportWriter;
 import net.cumba.corej.editor.engine.Analysis;
 import net.cumba.corej.editor.engine.CdtService;
+import net.cumba.corej.editor.engine.EngineStore;
 import net.cumba.corej.ruletest.cdt.ruletest.RuleTestCdt;
 import net.cumba.corej.ruletest.cdt.ruletest.RuleTestScenario;
+import net.cumba.corej.ruletest.cdt.ruletest.RuleTestScenario.Verdict;
 import net.cumba.corej.ruletest.cdt.ruletest.RunEnvironment;
 import net.cumba.corej.ruletest.cdt.ruletest.RunEnvironment.StoreAvailability;
 import net.cumba.corej.ruletest.cdt.ruletest.ScenarioReports;
@@ -40,7 +42,8 @@ import org.jspecify.annotations.Nullable;
  * {@code SidecarResolver} — the corpus gate's own code, so the verdict <b>is</b> the gate's. The
  * report JSON is the product's v2 document for that one run ({@code ScenarioReports} +
  * {@code JsonReportWriter}); the proposed expectations come from
- * {@code ViolationLocationCheck.toExpectations}, rendered by {@code RuleTestCdt}'s own writer.
+ * {@code ViolationLocationCheck.toExpectations}, rendered by {@code RuleTestCdt}'s own writer, with
+ * the {@code #test} line's {@code expect=} the proposal implies (REST review #2).
  *
  * <p>
  * Runs in the worker JVM ({@link RunWorker}); in-process only from tests. Never throws for what the
@@ -49,6 +52,8 @@ import org.jspecify.annotations.Nullable;
  */
 public final class RunExecutor
 {
+
+    private static final System.Logger LOG = System.getLogger(RunExecutor.class.getName());
 
     static final String RULE_ERRORS = "RULE_ERRORS";
 
@@ -113,7 +118,8 @@ public final class RunExecutor
         ScenarioRunResult result = ScenarioRunner.runText(rule, aJob.cdtText(), scenarioFile, env,
                 null);
         RuleTestScenario scenario = parseQuietly(aJob.cdtText(), sidecars, scenarioFile);
-        return toReport(rule, scenario, result, aJob.engineVersion(), diagnostics, millis(t0));
+        return toReport(rule, scenario, aJob.cdtText(), result, aJob.engineVersion(), diagnostics,
+                millis(t0));
     }
 
 
@@ -125,11 +131,13 @@ public final class RunExecutor
             return StoreAvailability.unavailable(origin,
                     "no metadata store is configured on this instance", false);
         }
+        // the reason reaches the client: the file name, never the server's path (security
+        // review L8)
         Path path = Path.of(aPath);
         if (!Files.isRegularFile(path))
         {
-            return StoreAvailability.unavailable(origin, "metadata store not found: " + path,
-                    false);
+            return StoreAvailability.unavailable(origin,
+                    "the configured metadata store file does not exist", false);
         }
         try
         {
@@ -137,12 +145,14 @@ public final class RunExecutor
         }
         catch (StoreFormatException e)
         {
-            return StoreAvailability.unavailable(origin, String.valueOf(e.getMessage()), true);
+            return StoreAvailability.unavailable(origin,
+                    EngineStore.withoutDirectory(e.describe(), path), true);
         }
         catch (IOException e)
         {
+            LOG.log(System.Logger.Level.WARNING, () -> "metadata store " + path + " unreadable", e);
             return StoreAvailability.unavailable(origin,
-                    "metadata store unreadable: " + e.getMessage(), false);
+                    "the configured metadata store is unreadable", false);
         }
     }
 
@@ -163,7 +173,7 @@ public final class RunExecutor
     }
 
 
-    static RunReport toReport(Rule aRule, @Nullable RuleTestScenario aScenario,
+    static RunReport toReport(Rule aRule, @Nullable RuleTestScenario aScenario, String aCdtText,
             ScenarioRunResult aResult, @Nullable String aEngineVersion,
             List<Analysis.Diagnostic> aDiagnostics, long aDurationMs)
     {
@@ -189,9 +199,9 @@ public final class RunExecutor
         {
             reportJson = reportJson(aRule, aScenario, aResult.results(), aEngineVersion);
         }
-        if (aScenario != null && eval != null && eval.violated())
+        if (aScenario != null && eval != null)
         {
-            expectations = expectations(aRule, aScenario, eval);
+            expectations = expectations(aRule, aScenario, aCdtText, eval);
         }
         return new RunReport(aResult.outcome().name(), aResult.code(), aResult.detail(),
                 new RunReport.ScopeGate(aResult.scopeGate().inScope(),
@@ -241,30 +251,53 @@ public final class RunExecutor
 
 
     /**
-     * The expectations the observed findings propose, rendered through {@code RuleTestCdt}'s own
-     * writer so quoting and ordering match a hand-written file exactly (as the corpus back-fill
-     * does).
+     * What "take actual as expected" proposes (§5.6, REST review #2), or {@code null}:
+     * <ul>
+     * <li>the rule fired: {@code expect=violation} and the {@code #expectViolation*} lines the
+     * observed findings imply, rendered through {@code RuleTestCdt}'s own writer so quoting and
+     * ordering match a hand-written file exactly (as the corpus back-fill does);</li>
+     * <li>it executed cleanly and fired nothing on a scenario that expects a violation:
+     * {@code expect=noViolation} with the expectations cleared;</li>
+     * <li>otherwise nothing — a skipped or errored run proposes no verdict.</li>
+     * </ul>
+     * The proposal carries the rewritten {@code #test} line, so the confirm diff shows the verdict
+     * change too, and {@code POST /api/cdt/expectations} with the same {@code expect} writes a text
+     * the parser accepts (the old proposal kept {@code expect=noViolation} beside
+     * {@code #expectViolationAt} lines, a buffer the parser refuses).
      */
     static RunReport.@Nullable Expectations expectations(Rule aRule, RuleTestScenario aScenario,
-            ScenarioRunner.EvalOutcome aEval)
+            String aCdtText, ScenarioRunner.EvalOutcome aEval)
     {
         try
         {
-            boolean valueBased = aRule.getEvaluationDomain() == null
-                    || aRule.getEvaluationDomain().rowCursor();
-            Expectations e = ViolationLocationCheck.toExpectations(aEval.violations(),
-                    aEval.totalCount(), aEval.truncated(), valueBased, aScenario.getDomain());
-            RuleTestScenario tmp = aScenario.toBuilder().expectViolationCount(e.count())
-                    .clearExpectedViolations().expectedViolations(e.ats()).build();
-            List<String> lines = new ArrayList<>();
-            for (String line : RuleTestCdt.toString(tmp).split("\n", -1))
+            if (aEval.violated())
             {
-                if (line.startsWith("#expectViolation"))
+                boolean valueBased = aRule.getEvaluationDomain() == null
+                        || aRule.getEvaluationDomain().rowCursor();
+                Expectations e = ViolationLocationCheck.toExpectations(aEval.violations(),
+                        aEval.totalCount(), aEval.truncated(), valueBased, aScenario.getDomain());
+                RuleTestScenario tmp = aScenario.toBuilder().expect(Verdict.VIOLATION)
+                        .expectErrorMessage(null).expectAbort(null).expectViolationCount(e.count())
+                        .clearExpectedViolations().expectedViolations(e.ats()).build();
+                List<String> lines = new ArrayList<>();
+                for (String line : RuleTestCdt.toString(tmp).split("\n", -1))
                 {
-                    lines.add(line);
+                    if (line.startsWith("#expectViolation"))
+                    {
+                        lines.add(line);
+                    }
                 }
+                String token = Verdict.VIOLATION.token();
+                return new RunReport.Expectations(e.count(), e.ats().size(), lines, token,
+                        CdtService.testLineWith(aCdtText, token));
             }
-            return new RunReport.Expectations(e.count(), e.ats().size(), lines);
+            if (aEval.executed() && !aEval.errored() && aScenario.getExpect() == Verdict.VIOLATION)
+            {
+                String token = Verdict.NO_VIOLATION.token();
+                return new RunReport.Expectations(null, 0, List.of(), token,
+                        CdtService.testLineWith(aCdtText, token));
+            }
+            return null;
         }
         catch (RuntimeException e)
         {

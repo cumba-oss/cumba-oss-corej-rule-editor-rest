@@ -3,6 +3,7 @@ package net.cumba.corej.editor.session;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import java.time.Duration;
 import java.util.List;
 import net.cumba.corej.editor.config.EditorProperties;
 import net.cumba.corej.editor.config.RepositoryCoordinates;
@@ -12,6 +13,7 @@ import net.cumba.corej.editor.forge.ForgeCredentials;
 import net.cumba.corej.editor.forge.ForgeUser;
 import net.cumba.corej.editor.forge.RepositoryAccess;
 import net.cumba.corej.editor.git.WorkspaceService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -20,14 +22,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextHolderStrategy;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.stereotype.Service;
 
 /**
  * Login and logout (§5.1.2–5.1.5). The probe: {@code GET /user} → identity; {@code GET /repos/…} →
  * {@code pull} or refused; {@code push} AND a successful receive-pack advertisement → edit mode
- * (review M4), else read-only. Then: session id rotated, the token stored as a transient session
- * attribute, the principal saved in the security context, and the workspace cloned with the user's
- * own token if it does not exist yet.
+ * (review M4), else read-only. Then: session id rotated, the CSRF token rotated (security review
+ * INFO: {@code changeSessionId} keeps the attributes, the pre-login token among them), the session
+ * lifetime raised from the short pre-login one to {@code server.servlet.session.timeout} (security
+ * review L2), the token stored as a transient session attribute, the principal saved in the
+ * security context, and the workspace cloned with the user's own token if it does not exist yet.
  */
 @Service
 public class LoginService
@@ -47,17 +52,25 @@ public class LoginService
 
     private final SecurityContextRepository contexts;
 
+    private final CsrfTokenRepository csrfTokens;
+
+    private final Duration sessionTimeout;
+
     private final SecurityContextHolderStrategy holder = SecurityContextHolder
             .getContextHolderStrategy();
 
     public LoginService(ForgeClient aForge, EditorProperties aProperties,
-            WorkspaceService aWorkspaces, SecurityContextRepository aContexts)
+            WorkspaceService aWorkspaces, SecurityContextRepository aContexts,
+            CsrfTokenRepository aCsrfTokens,
+            @Value("${server.servlet.session.timeout:8h}") Duration aSessionTimeout)
     {
         forge = aForge;
         repository = aProperties.coordinates();
         properties = aProperties;
         workspaces = aWorkspaces;
         contexts = aContexts;
+        csrfTokens = aCsrfTokens;
+        sessionTimeout = aSessionTimeout;
     }
 
 
@@ -94,6 +107,10 @@ public class LoginService
             aRequest.changeSessionId();
         }
         HttpSession session = aRequest.getSession(true);
+        session.setMaxInactiveInterval(
+                (int) Math.min(Integer.MAX_VALUE, sessionTimeout.toSeconds()));
+        // a token the client saw before the login is worthless after it: the SPA re-fetches
+        csrfTokens.saveToken(null, aRequest, aResponse);
         session.setAttribute(SessionCredentials.ATTRIBUTE, credentials);
         Authentication auth = UsernamePasswordAuthenticationToken.authenticated(principal, null,
                 List.of(new SimpleGrantedAuthority(write ? ROLE_EDIT : ROLE_READ)));

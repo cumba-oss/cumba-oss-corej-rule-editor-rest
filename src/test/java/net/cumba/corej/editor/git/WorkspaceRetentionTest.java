@@ -135,4 +135,43 @@ class WorkspaceRetentionTest
             restarted.closeAll();
         }
     }
+
+
+    @Test
+    void aWorkspaceInUseIsKeptAndADeletedOneIsRetired() throws Exception
+    {
+        // security review L10: the check and the deletion happen in ONE lock hold; a workspace
+        // whose lock a request holds is in use
+        Workspace ws = open(8);
+        java.util.concurrent.CountDownLatch locked = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread request = new Thread(() ->
+        {
+            ws.lock().lock();
+            try
+            {
+                locked.countDown();
+                release.await();
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            finally
+            {
+                ws.lock().unlock();
+            }
+        });
+        request.start();
+        locked.await();
+        WorkspaceRetention retention = new WorkspaceRetention(service, Duration.ofDays(1));
+        Instant late = Instant.now().plus(Duration.ofDays(400));
+        assertEquals(List.of(8L), retention.sweep(late).kept(), "held by a request: kept");
+        assertFalse(ws.isRetired());
+        release.countDown();
+        request.join(10_000);
+        assertEquals(List.of(8L), retention.sweep(late).deleted());
+        assertTrue(ws.isRetired(), "a request still holding the old object finds it retired");
+        assertFalse(Files.exists(service.directoryFor(8)));
+    }
 }

@@ -252,11 +252,15 @@ class WorkspaceTest
         // Control: in a plain clone with the same hooks, JGit runs both hooks.
         Path marker = tmp.resolve("control-pre-commit");
         Path pushMarker = tmp.resolve("control-pre-push");
+        Path postMarker = tmp.resolve("control-post-commit");
         plantHook(remote.seedDir().resolve(".git"), "pre-commit", marker);
         plantHook(remote.seedDir().resolve(".git"), "pre-push", pushMarker);
+        plantHook(remote.seedDir().resolve(".git"), "post-commit", postMarker);
         remote.commitAndPush("main", Map.of("README.md", "# control\n"), "control");
         assertTrue(Files.exists(marker), "control: JGit runs a planted pre-commit hook");
         assertTrue(Files.exists(pushMarker), "control: JGit runs a planted pre-push hook");
+        // security review INFO: --no-verify does not cover post-commit; core.hooksPath does
+        assertTrue(Files.exists(postMarker), "control: JGit runs a planted post-commit hook");
 
         // The workspace: the same hooks planted in .git/hooks, and in the hooksPath directory
         // nothing (the server owns it). Neither commit nor push runs them.
@@ -265,10 +269,12 @@ class WorkspaceTest
         plantHook(ws.directory().resolve(".git"), "pre-commit", wsMarker);
         plantHook(ws.directory().resolve(".git"), "pre-push", wsPushMarker);
         plantHook(ws.directory().resolve(".git"), "commit-msg", tmp.resolve("ws-commit-msg"));
+        plantHook(ws.directory().resolve(".git"), "post-commit", tmp.resolve("ws-post-commit"));
         onFeatureWithOneCommit();
         ws.push(null);
         assertFalse(Files.exists(wsMarker), "pre-commit ran in the workspace");
         assertFalse(Files.exists(tmp.resolve("ws-commit-msg")), "commit-msg ran");
+        assertFalse(Files.exists(tmp.resolve("ws-post-commit")), "post-commit ran");
         assertFalse(Files.exists(wsPushMarker), "pre-push ran in the workspace");
         assertEquals(ws.head(), remote.tip("feature"));
     }
@@ -596,5 +602,107 @@ class WorkspaceTest
         assertTrue(ws.lastUsed().isAfter(java.time.Instant.EPOCH));
         assertFalse(ws.status().paths().contains(Workspace.LAST_USED_MARKER),
                 "nothing the editor keeps shows in git status");
+    }
+
+
+    @Test
+    void everyBranchNameIsCheckedBeforeJGitSeesIt() throws IOException
+    {
+        // security review L6: switch / delete / update passed request names to JGit unchecked
+        for (String bad : List.of("../config", "-x", "a..b", "x.lock", "a b", "refs/../x", "",
+                "x~1", "x^", "x:y"))
+        {
+            refused("BAD_REQUEST", () -> ws.switchBranch(bad));
+            refused("BAD_REQUEST", () -> ws.deleteBranch(bad));
+            refused("BAD_REQUEST", () -> ws.updateFrom(bad, null));
+            refused("BAD_REQUEST", () -> ws.createBranch(bad, null));
+        }
+        assertEquals("feature/x-1", Workspace.requireBranchName("feature/x-1"));
+    }
+
+
+    @Test
+    void theDefaultBranchIsProtectedWhateverItsCase() throws IOException
+    {
+        // security review L7: a case-insensitive file system aliases MAIN to main
+        assertTrue(ws.isDefaultBranch("MAIN"));
+        assertTrue(ws.isDefaultBranch("Main"));
+        assertFalse(ws.isDefaultBranch("mainline"));
+        refused("DEFAULT_BRANCH", () -> ws.createBranch("MAIN", null));
+    }
+
+    /** A server that accepts connections and never answers; closing it closes them all. */
+    static final class BlackHole implements AutoCloseable
+    {
+
+        private final java.net.ServerSocket server;
+
+        private final List<java.net.Socket> held = new java.util.ArrayList<>();
+
+        BlackHole() throws IOException
+        {
+            server = new java.net.ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress());
+            Thread acceptor = new Thread(this::acceptForever);
+            acceptor.setDaemon(true);
+            acceptor.start();
+        }
+
+
+        @SuppressWarnings("PMD.CloseResource") // every accepted socket is closed by close()
+        private void acceptForever()
+        {
+            try
+            {
+                while (!server.isClosed())
+                {
+                    java.net.Socket socket = server.accept(); // accept, then never answer
+                    synchronized (held)
+                    {
+                        held.add(socket);
+                    }
+                }
+            }
+            catch (IOException e)
+            {
+                assertTrue(server.isClosed(), "the black hole only stops when closed: " + e);
+            }
+        }
+
+
+        int port()
+        {
+            return server.getLocalPort();
+        }
+
+
+        @Override
+        @SuppressWarnings("PMD.CloseResource") // this IS the close of every held socket
+        public void close() throws IOException
+        {
+            server.close();
+            synchronized (held)
+            {
+                for (java.net.Socket socket : held)
+                {
+                    socket.close();
+                }
+            }
+        }
+    }
+
+    @Test
+    void aRemoteThatNeverAnswersTimesOut() throws IOException
+    {
+        // security review L11: no transport timeout parked the request (and the lock) for ever
+        try (BlackHole blackHole = new BlackHole())
+        {
+            String url = "http://127.0.0.1:" + blackHole.port() + "/acme/rules.git";
+            long t0 = System.nanoTime();
+            assertThrows(IOException.class, () -> org.junit.jupiter.api.Assertions
+                    .assertTimeoutPreemptively(java.time.Duration.ofSeconds(90), () -> Workspace
+                            .create(tmp.resolve("ws-black-hole"), url, "main", null, hooks, 2)));
+            long seconds = (System.nanoTime() - t0) / 1_000_000_000L;
+            assertTrue(seconds < 60, "the 2 s transport timeout ended it: " + seconds + " s");
+        }
     }
 }

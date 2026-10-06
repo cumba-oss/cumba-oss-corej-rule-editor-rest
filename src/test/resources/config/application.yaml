@@ -1,0 +1,13 @@
+# Test-only overrides, loaded by Spring Boot from classpath:/config/ ON TOP of the packaged
+# application.yaml (never shipped: test resources are not in the jar).
+#
+# * The fixtures are a file:// bare repository (RemoteRepo) and an http:// fake forge on the
+#   loopback: the production defaults refuse both (security review L3), so the tests allow them.
+# * Every MockMvc request comes from 127.0.0.1 and the contexts log in dozens of times a minute:
+#   the per-client login limit (security review L9) is off here; LimitsApiTest turns it on.
+editor:
+  repository:
+    allow-http: true
+    allow-file: true
+  limits:
+    logins-per-minute: 0

@@ -48,16 +48,25 @@ import org.jspecify.annotations.Nullable;
  * it (§5.2), under the §5.8 rules:
  * <ul>
  * <li>created with {@code core.symlinks=false} and {@code core.hooksPath} pointing at an empty,
- * server-owned directory; commits pass {@code --no-verify} (§5.8.3). JGit runs repository hooks
- * otherwise, so a committed {@code .git/hooks/pre-commit} would run as the server;</li>
+ * server-owned directory (§5.8.3). JGit runs repository hooks otherwise, so a planted
+ * {@code .git/hooks/pre-commit} would run as the server. ⚠ {@code core.hooksPath} is the control
+ * that holds: commits also pass {@code --no-verify}, but that skips only {@code pre-commit} and
+ * {@code commit-msg} — JGit still runs {@code post-commit} (and {@code pre-push} on a push) from
+ * the hooks directory (security review INFO; WorkspaceTest plants all four);</li>
  * <li>the default branch is read-only: file writes, commits and pushes on it are refused (§5.2,
- * review M2);</li>
+ * review M2), compared case-insensitively (a case-insensitive file system aliases {@code MAIN} to
+ * {@code main}). ⚠ This is a convenience of the editor, not the barrier: the name is frozen at
+ * clone, so the FORGE's branch protection on the default branch is what keeps it safe (security
+ * review L7);</li>
+ * <li>every branch name a request carries is a valid ref name not starting with {@code -} (security
+ * review L6), before JGit sees it;</li>
  * <li>branch switch and update-from-* need a clean tree (§5.2, review H4); a conflicting merge is
  * aborted by resetting to the pre-merge HEAD;</li>
  * <li>a push is never forced; non-fast-forward is reported (§5.2);</li>
  * <li>the last pushed SHA per branch is recorded in {@code .git/config} (§5.2, review M5), so
  * nothing the editor keeps ever shows up in {@code git status};</li>
- * <li>every operation, reads included, runs under the workspace {@link #lock() lock} (§5.8.4).</li>
+ * <li>every operation, reads included, runs under the workspace {@link #lock() lock} (§5.8.4);</li>
+ * <li>every transport (clone, fetch, push) has a timeout (security review L11).</li>
  * </ul>
  */
 public final class Workspace implements AutoCloseable
@@ -78,6 +87,9 @@ public final class Workspace implements AutoCloseable
     /** A marker under {@code .git/} whose mtime is the workspace's last use (retention). */
     static final String LAST_USED_MARKER = "cumba-editor-last-used";
 
+    /** The transport timeout when none is configured (seconds, JGit's unit). */
+    public static final int DEFAULT_GIT_TIMEOUT_SECONDS = 60;
+
     private final Path dir;
 
     private final Git git;
@@ -90,13 +102,18 @@ public final class Workspace implements AutoCloseable
 
     private final WorkingTreeSource source;
 
-    private Workspace(Path aDir, Git aGit, String aDefaultBranch)
+    private final int gitTimeoutSeconds;
+
+    private volatile boolean retired;
+
+    private Workspace(Path aDir, Git aGit, String aDefaultBranch, int aGitTimeoutSeconds)
     {
         dir = aDir;
         git = aGit;
         repo = aGit.getRepository();
         defaultBranch = aDefaultBranch;
         source = new WorkingTreeSource(aDir);
+        gitTimeoutSeconds = aGitTimeoutSeconds;
     }
 
 
@@ -121,9 +138,24 @@ public final class Workspace implements AutoCloseable
      * @param aCredentials
      *            the user's token; null for a credential-free transport (tests use {@code file://})
      */
-    @SuppressWarnings("PMD.CloseResource") // owned by the returned Workspace, closed on failure
     public static Workspace create(Path aDir, String aUrl, String aDefaultBranch,
             @Nullable CredentialsProvider aCredentials, Path aHooksDir)
+        throws IOException
+    {
+        return create(aDir, aUrl, aDefaultBranch, aCredentials, aHooksDir,
+                DEFAULT_GIT_TIMEOUT_SECONDS);
+    }
+
+
+    /**
+     * {@link #create(Path, String, String, CredentialsProvider, Path)} with a transport timeout.
+     *
+     * @param aGitTimeoutSeconds
+     *            the timeout of every fetch and push of this workspace (security review L11)
+     */
+    @SuppressWarnings("PMD.CloseResource") // owned by the returned Workspace, closed on failure
+    public static Workspace create(Path aDir, String aUrl, String aDefaultBranch,
+            @Nullable CredentialsProvider aCredentials, Path aHooksDir, int aGitTimeoutSeconds)
         throws IOException
     {
         Files.createDirectories(aDir);
@@ -138,7 +170,7 @@ public final class Workspace implements AutoCloseable
             c.setString(EDITOR_SECTION, null, DEFAULT_BRANCH_KEY, aDefaultBranch);
             c.save();
             g.fetch().setRemote(ORIGIN).setCredentialsProvider(aCredentials)
-                    .setRemoveDeletedRefs(true).call();
+                    .setRemoveDeletedRefs(true).setTimeout(aGitTimeoutSeconds).call();
             if (g.getRepository().exactRef(remoteRef(aDefaultBranch)) == null)
             {
                 throw new IOException("the remote has no branch '" + aDefaultBranch + "'");
@@ -146,7 +178,7 @@ public final class Workspace implements AutoCloseable
             g.branchCreate().setName(aDefaultBranch).setStartPoint(ORIGIN + "/" + aDefaultBranch)
                     .setUpstreamMode(SetupUpstreamMode.TRACK).call();
             g.reset().setMode(ResetType.HARD).setRef(Constants.R_HEADS + aDefaultBranch).call();
-            Workspace ws = new Workspace(aDir, g, aDefaultBranch);
+            Workspace ws = new Workspace(aDir, g, aDefaultBranch, aGitTimeoutSeconds);
             ws.touch();
             return ws;
         }
@@ -175,6 +207,14 @@ public final class Workspace implements AutoCloseable
     /** Opens an existing workspace, re-asserting the hardening config. */
     public static Workspace open(Path aDir, Path aHooksDir) throws IOException
     {
+        return open(aDir, aHooksDir, DEFAULT_GIT_TIMEOUT_SECONDS);
+    }
+
+
+    /** {@link #open(Path, Path)} with a transport timeout (security review L11). */
+    public static Workspace open(Path aDir, Path aHooksDir, int aGitTimeoutSeconds)
+        throws IOException
+    {
         Git g = Git.open(aDir.toFile());
         try
         {
@@ -182,12 +222,12 @@ public final class Workspace implements AutoCloseable
             String def = c.getString(EDITOR_SECTION, null, DEFAULT_BRANCH_KEY);
             if (def == null || def.isBlank())
             {
-                throw new IOException(aDir + " is not an editor workspace (no " + EDITOR_SECTION
-                        + "." + DEFAULT_BRANCH_KEY + ")");
+                throw new IOException(aDir.getFileName() + " is not an editor workspace (no "
+                        + EDITOR_SECTION + "." + DEFAULT_BRANCH_KEY + ")");
             }
             harden(c, aHooksDir);
             c.save();
-            return new Workspace(aDir, g, def);
+            return new Workspace(aDir, g, def, aGitTimeoutSeconds);
         }
         catch (IOException | RuntimeException e)
         {
@@ -234,6 +274,34 @@ public final class Workspace implements AutoCloseable
     public CorpusSource source()
     {
         return source;
+    }
+
+
+    /**
+     * The HEAD commit as an immutable {@link CorpusSource}: unlike the working tree it may be read
+     * after the lock is released — a later commit or checkout moves HEAD, never this snapshot (REST
+     * review #5: the corpus index is built from it outside the lock).
+     */
+    public SnapshotSource headSnapshot() throws IOException
+    {
+        return new SnapshotSource(repo, head());
+    }
+
+
+    /**
+     * Marks the workspace as removed (retention, security review L10): a request that obtained it
+     * before the deletion and was waiting for its lock must not use it.
+     */
+    void retire()
+    {
+        retired = true;
+    }
+
+
+    /** Whether the workspace was removed since it was handed out. */
+    public boolean isRetired()
+    {
+        return retired;
     }
 
 
@@ -292,9 +360,33 @@ public final class Workspace implements AutoCloseable
     }
 
 
+    /**
+     * Whether a branch is the default branch — case-insensitively, since a case-insensitive file
+     * system resolves {@code refs/heads/MAIN} to the same ref file as {@code main} (security review
+     * L7).
+     */
     public boolean isDefaultBranch(String aBranch)
     {
-        return defaultBranch.equals(aBranch);
+        return defaultBranch.equalsIgnoreCase(aBranch);
+    }
+
+
+    /**
+     * The check every branch name from a request passes before JGit sees it (security review L6): a
+     * valid ref name under {@code refs/heads/} that does not start with {@code -}. JGit's own
+     * lookups would mostly refuse the rest by accident; this refuses it on purpose.
+     *
+     * @throws EditorException
+     *             400 {@code BAD_REQUEST}
+     */
+    public static String requireBranchName(String aName)
+    {
+        if (aName.isEmpty() || aName.startsWith("-")
+                || !Repository.isValidRefName(Constants.R_HEADS + aName))
+        {
+            throw Errors.badRequest("'" + aName + "' is not a valid branch name");
+        }
+        return aName;
     }
 
 
@@ -464,7 +556,7 @@ public final class Workspace implements AutoCloseable
         try
         {
             git.fetch().setRemote(ORIGIN).setCredentialsProvider(aCredentials)
-                    .setRemoveDeletedRefs(true).call();
+                    .setRemoveDeletedRefs(true).setTimeout(gitTimeoutSeconds).call();
         }
         catch (TransportException e)
         {
@@ -505,7 +597,8 @@ public final class Workspace implements AutoCloseable
         try
         {
             results = git.push().setRemote(ORIGIN).setRefSpecs(new RefSpec(refName + ":" + refName))
-                    .setCredentialsProvider(aCredentials).setForce(false).call();
+                    .setCredentialsProvider(aCredentials).setForce(false)
+                    .setTimeout(gitTimeoutSeconds).call();
         }
         catch (TransportException e)
         {
@@ -551,10 +644,7 @@ public final class Workspace implements AutoCloseable
     public void createBranch(String aName, @Nullable CredentialsProvider aCredentials)
         throws IOException
     {
-        if (!Repository.isValidRefName(Constants.R_HEADS + aName) || aName.startsWith("-"))
-        {
-            throw Errors.badRequest("'" + aName + "' is not a valid branch name");
-        }
+        requireBranchName(aName);
         requireNotDefault(aName);
         requireClean();
         fetch(aCredentials);
@@ -579,6 +669,7 @@ public final class Workspace implements AutoCloseable
     /** Checks out a local branch, or a remote branch as a new tracking local one. */
     public void switchBranch(String aName) throws IOException
     {
+        requireBranchName(aName);
         requireClean();
         try
         {
@@ -607,6 +698,7 @@ public final class Workspace implements AutoCloseable
     /** Deletes a local branch that holds nothing unpushed ("delete merged branch", §5.2). */
     public void deleteBranch(String aName) throws IOException
     {
+        requireBranchName(aName);
         if (aName.equals(currentBranch()))
         {
             throw Errors.currentBranch(aName);
@@ -642,6 +734,7 @@ public final class Workspace implements AutoCloseable
     public MergeOutcome updateFrom(String aRemoteBranch, @Nullable CredentialsProvider aCredentials)
         throws IOException
     {
+        requireBranchName(aRemoteBranch);
         String current = currentBranch();
         requireNotDefault(current);
         requireClean();

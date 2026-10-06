@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.cumba.corej.editor.testing.MapSource;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import net.cumba.corej.editor.testing.TestStore;
@@ -177,6 +178,49 @@ class RuleAnalyserTest
         Analysis live = analyser.analyse(corpus(), "rules-src/checks/CDISC/CDISC-CG9999.yaml",
                 parked.replace("Executability: \"Not Executable\"\n", ""), null);
         assertFalse(live.parked());
+    }
+
+
+    @Test
+    void aParkedRuleStillGetsItsDerivedFieldsScopeAndAuthorities() throws IOException
+    {
+        // REST review #8: a parked rule had no derived fields though its author edits it
+        String parked = RemoteRepo.CHECK_B_TEXT.replace("Description:",
+                "Executability: \"Not Executable\"\nDescription:");
+        Analysis a = analyser.analyse(corpus(), RemoteRepo.CHECK_B, parked, null);
+        assertTrue(a.parked());
+        assertFalse(a.loaded(), "parked: never loaded, as the gate sees it");
+        assertTrue(a.diagnostics().stream().anyMatch(d -> "PARKED".equals(d.code())));
+        Analysis.Derived derived = a.derived();
+        assertNotNull(derived, "derived from the check read without its Executability");
+        assertTrue(derived.outputVariables().effective().containsAll(List.of("AEDECOD", "AETERM")),
+                derived.outputVariables().toString());
+        assertNotNull(derived.authorities(), "the authorities of the parked canonical node");
+        assertTrue(
+                a.scope().datasets().stream().anyMatch(d -> "AE".equals(d.name()) && d.inScope()),
+                "the scope universe of the check");
+        assertFalse(a.scope().variables().isEmpty());
+        assertFalse(a.referencedVariables().isEmpty());
+        // a parked check that does not load even unparked: the authorities, nothing derived
+        Analysis broken = analyser.analyse(corpus(), RemoteRepo.CHECK_B,
+                parked.replace("AEDECOD != \"\" and AETERM == \"\"", "(AEDECOD =="), null);
+        assertTrue(broken.parked());
+        assertNotNull(broken.derived());
+        assertEquals("NONE", broken.derived().sensitivityConfidence());
+        assertEquals(List.of(), broken.derived().outputVariables().effective());
+    }
+
+
+    @Test
+    void aClassVariableStandsForThePrefixedVariablesOfInScopeDatasetsOnly()
+    {
+        // REST review #7: by suffix and length alone, --ENDTC listed DM's RFENDTC
+        assertEquals(List.of("AEENDTC"),
+                VariableCatalogue.concreteOf("--ENDTC",
+                        List.of("AEENDTC", "RFENDTC", "CMENDTC", "--ENDTC", "AEENDTCX"),
+                        Set.of("AE", "DM")));
+        assertEquals(List.of("AEENDTC", "CMENDTC"), VariableCatalogue.concreteOf("--ENDTC",
+                List.of("AEENDTC", "RFENDTC", "CMENDTC"), Set.of("AE", "CM")));
     }
 
 

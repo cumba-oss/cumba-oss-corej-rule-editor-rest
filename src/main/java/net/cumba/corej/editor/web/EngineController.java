@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import net.cumba.corej.authoring.CorpusIndex;
 import net.cumba.corej.authoring.RuleFamily;
 import net.cumba.corej.authoring.RuleInsight;
@@ -25,6 +24,7 @@ import net.cumba.corej.editor.engine.CorpusText;
 import net.cumba.corej.editor.engine.EngineStore;
 import net.cumba.corej.editor.engine.FunctionCatalogue;
 import net.cumba.corej.editor.engine.Json;
+import net.cumba.corej.editor.engine.LruCache;
 import net.cumba.corej.editor.engine.RuleAnalyser;
 import net.cumba.corej.editor.engine.ScenarioCatalogue;
 import net.cumba.corej.editor.error.EditorException;
@@ -49,7 +49,9 @@ import org.springframework.web.bind.annotation.RestController;
  * tooltip catalogues, the scenario list, related rules, the scenario grid's parse / splice /
  * expectations, and the run. Reads serve the session's working tree, else the anonymous snapshot
  * when it is on ({@link Access#read}); every buffer is size-capped ({@code 413 TOO_LARGE}, §5.8.5).
- * Nothing here writes to a workspace.
+ * Nothing here writes to a workspace, and nothing slow holds its lock: a run exports under it and
+ * runs outside it (security review M1), the corpus index is prepared under it and built outside it
+ * (REST review #5), and the grid's text operations need no workspace at all (REST review #4).
  */
 @RestController
 @RequestMapping("/api")
@@ -60,6 +62,9 @@ public class EngineController
     static final String TOO_LARGE = "TOO_LARGE";
 
     static final int MAX_CT_TERMS = 500;
+
+    /** Distinct {@code functions.md} texts whose catalogue is kept (REST review #11). */
+    static final int MAX_FUNCTION_CATALOGUES = 8;
 
     private final Access access;
 
@@ -73,10 +78,15 @@ public class EngineController
 
     private final int maxBufferBytes;
 
-    private final Map<String, List<FunctionCatalogue.FunctionInfo>> functionsByText = new ConcurrentHashMap<>();
+    private final ClientAddress clients;
+
+    /** Catalogue by the SHA-1 of the branch's functions.md: bounded, so branches cannot grow it. */
+    private final Map<String, List<FunctionCatalogue.FunctionInfo>> functionsByText = new LruCache<>(
+            MAX_FUNCTION_CATALOGUES);
 
     public EngineController(Access aAccess, RuleAnalyser aAnalyser, CorpusAnalysisIndex aIndex,
-            EngineStore aStore, RunService aRuns, EditorProperties aProperties)
+            EngineStore aStore, RunService aRuns, EditorProperties aProperties,
+            ClientAddress aClients)
     {
         access = aAccess;
         analyser = aAnalyser;
@@ -84,6 +94,7 @@ public class EngineController
         store = aStore;
         runs = aRuns;
         maxBufferBytes = aProperties.getLimits().getMaxBufferBytes();
+        clients = aClients;
     }
 
     // ---- analysis -------------------------------------------------------------------------
@@ -121,15 +132,35 @@ public class EngineController
         return access.read(aUser, aRequest, v ->
         {
             String md = CorpusText.readOrEmpty(v.source(), CorpusText.FUNCTIONS_MD);
-            return new Dtos.Functions(
-                    functionsByText.computeIfAbsent(md, FunctionCatalogue::build));
+            return new Dtos.Functions(functions(md));
         });
+    }
+
+
+    List<FunctionCatalogue.FunctionInfo> functions(String aFunctionsMd)
+    {
+        String key = CorpusAnalysisIndex.sha1(aFunctionsMd.getBytes(StandardCharsets.UTF_8));
+        synchronized (functionsByText)
+        {
+            return functionsByText.computeIfAbsent(key, k -> FunctionCatalogue.build(aFunctionsMd));
+        }
+    }
+
+
+    /** How many function catalogues are kept right now (the bound's test). */
+    int cachedFunctionCatalogues()
+    {
+        synchronized (functionsByText)
+        {
+            return functionsByText.size();
+        }
     }
 
 
     @GetMapping("/engine/schema")
     @Operation(summary = "The branch's authored rule schema (rule-check.schema.json) for key and"
-            + " enum completion and key tooltips; 404 NO_SCHEMA when the branch carries none")
+            + " enum completion and key tooltips; 404 NO_SCHEMA when the branch carries none,"
+            + " 422 SCHEMA_INVALID when its file is not JSON")
     public Object schema(@AuthenticationPrincipal @Nullable SessionUser aUser,
             HttpServletRequest aRequest)
         throws IOException
@@ -152,7 +183,9 @@ public class EngineController
             }
             catch (RuntimeException e)
             {
-                EditorException notJson = new EditorException(HttpStatus.NOT_FOUND, "NO_SCHEMA",
+                // its own code (REST review #9): "absent" and "broken" are different situations
+                EditorException notJson = new EditorException(HttpStatus.UNPROCESSABLE_CONTENT,
+                        "SCHEMA_INVALID",
                         "the branch's rule-check.schema.json is not JSON: " + e.getMessage());
                 notJson.initCause(e);
                 throw notJson;
@@ -249,30 +282,33 @@ public class EngineController
         throws IOException
     {
         String rule = requireRuleId(aRule);
-        return access.read(aUser, aRequest, v ->
+        // the index is prepared under the workspace lock and built outside it (REST review #5)
+        Prepared prepared = access.read(aUser, aRequest,
+                v -> new Prepared(v.branch(), v.head(), CorpusAnalysisIndex.prepare(v)));
+        CorpusAnalysisIndex.Index idx = index.of(prepared.request());
+        CorpusAnalysisIndex.RuleSummary summary = idx.rules().get(rule);
+        List<CorpusIndex.ReferenceKey> references = summary == null || summary.check() == null
+                ? idx.corpusIndex().referencesOf(rule)
+                : CorpusIndex.referencesOf(summary.check());
+        List<Dtos.RelatedRule> out = new ArrayList<>();
+        for (RuleInsight.RelatedRule r : RuleInsight.related(rule, references, idx.corpusIndex()))
         {
-            CorpusAnalysisIndex.Index idx = index.of(v);
-            CorpusAnalysisIndex.RuleSummary summary = idx.rules().get(rule);
-            List<CorpusIndex.ReferenceKey> references = summary == null || summary.check() == null
-                    ? idx.corpusIndex().referencesOf(rule)
-                    : CorpusIndex.referencesOf(summary.check());
-            List<Dtos.RelatedRule> out = new ArrayList<>();
-            for (RuleInsight.RelatedRule r : RuleInsight.related(rule, references,
-                    idx.corpusIndex()))
-            {
-                CorpusAnalysisIndex.RuleSummary other = idx.rules().get(r.coreId());
-                String family = RuleFamily.of(r.coreId());
-                out.add(new Dtos.RelatedRule(r.coreId(), r.relation(), r.via(),
-                        other == null ? family : other.family(),
-                        other == null ? CorpusLayout.checkPath(family, r.coreId()) : other.path(),
-                        other != null));
-            }
-            return new Dtos.Related(v.branch(), v.head(), rule, out);
-        });
+            CorpusAnalysisIndex.RuleSummary other = idx.rules().get(r.coreId());
+            String family = RuleFamily.of(r.coreId());
+            out.add(new Dtos.RelatedRule(r.coreId(), r.relation(), r.via(),
+                    other == null ? family : other.family(),
+                    other == null ? CorpusLayout.checkPath(family, r.coreId()) : other.path(),
+                    other != null));
+        }
+        return new Dtos.Related(prepared.branch(), prepared.head(), rule, out);
+    }
+
+    /** A view's coordinates and its prepared index request, carried out of the lock. */
+    record Prepared(String branch, String head, CorpusAnalysisIndex.Request request)
+    {
     }
 
     // ---- the scenario grid --------------------------------------------------------------
-
 
     @PostMapping("/cdt/parse")
     @Operation(summary = "Parse a scenario text into its dataset blocks and prelude directives"
@@ -282,45 +318,55 @@ public class EngineController
         throws IOException
     {
         requireContent(aBody.content());
-        return access.read(aUser, aRequest, v -> CdtService.parse(aBody.content()));
+        access.requireReader(aUser);
+        return CdtService.parse(aBody.content());
     }
 
 
     @PostMapping("/cdt/splice")
-    @Operation(summary = "Rewrite one dataset block of a scenario text from the grid; everything"
-            + " else stays byte for byte (400 CDT_UNREPRESENTABLE with the engine's message)")
+    @Operation(summary = "Rewrite one dataset block of a scenario text from the grid, addressed"
+            + " by its index (else the first block of its name); everything else stays byte for"
+            + " byte (400 CDT_UNREPRESENTABLE with the engine's message)")
     public Dtos.CdtText cdtSplice(@AuthenticationPrincipal @Nullable SessionUser aUser,
-            @RequestBody Dtos.CdtSplice aBody, HttpServletRequest aRequest)
-        throws IOException
+            @RequestBody Dtos.CdtSplice aBody)
     {
         requireContent(aBody.content());
         if (aBody.dataset() == null)
         {
             throw Errors.badRequest("dataset is required");
         }
-        return access.read(aUser, aRequest,
-                v -> new Dtos.CdtText(CdtService.splice(aBody.content(), aBody.dataset())));
+        access.requireReader(aUser);
+        return new Dtos.CdtText(CdtService.splice(aBody.content(), aBody.dataset(), aBody.index()));
     }
 
 
     @PostMapping("/cdt/expectations")
     @Operation(summary = "Replace the #expectViolation* lines of a scenario text with the"
-            + " confirmed ones (take actual as expected)")
+            + " confirmed ones and, with expect, set the #test line's expect= to the run's"
+            + " proposal (take actual as expected)")
     public Dtos.CdtText cdtExpectations(@AuthenticationPrincipal @Nullable SessionUser aUser,
-            @RequestBody Dtos.CdtExpectations aBody, HttpServletRequest aRequest)
-        throws IOException
+            @RequestBody Dtos.CdtExpectations aBody)
     {
         requireContent(aBody.content());
-        return access.read(aUser, aRequest,
-                v -> new Dtos.CdtText(CdtService.withExpectations(aBody.content(), aBody.lines())));
+        List<String> lines = aBody.lines();
+        if (lines == null)
+        {
+            // REST review #9: a missing list once wiped the expectations; [] does that on purpose
+            throw Errors.badRequest("lines is required ([] clears the expectations)");
+        }
+        access.requireReader(aUser);
+        return new Dtos.CdtText(
+                CdtService.withExpectations(aBody.content(), lines, aBody.expect()));
     }
 
     // ---- the run --------------------------------------------------------------------------
 
 
     @PostMapping("/run")
-    @Operation(summary = "Run one rule buffer against one scenario buffer in a child JVM worker"
-            + " (503 RUN_BUSY beyond the queue, 429 RATE_LIMITED for anonymous clients)")
+    @Operation(summary = "Run one rule buffer against one scenario buffer in a child JVM worker:"
+            + " one run at a time per user or anonymous client (409 RUN_IN_PROGRESS), 503 RUN_BUSY"
+            + " beyond the queue, 503 WORKSPACE_BUSY when the workspace stays locked, 429"
+            + " RATE_LIMITED for anonymous clients")
     public Dtos.RunResult run(@AuthenticationPrincipal @Nullable SessionUser aUser,
             @RequestBody Dtos.Run aBody, HttpServletRequest aRequest)
         throws IOException
@@ -332,23 +378,36 @@ public class EngineController
         }
         String path = PathPolicy.check(aBody.path());
         String scenarioPath = PathPolicy.check(aBody.scenarioPath());
+        RunService.requireScenarioPath(scenarioPath);
         requireSize(aBody.content(), "content");
         requireSize(aBody.scenarioContent(), "scenarioContent");
         if (aBody.docs() != null)
         {
             requireSize(aBody.docs(), "docs");
         }
-        String anonymousKey = aUser == null ? aRequest.getRemoteAddr() : null;
-        return access.read(aUser, aRequest, v ->
+        access.requireReader(aUser);
+        boolean anonymous = aUser == null;
+        String runner = aUser != null ? RunService.userRunner(aUser.id())
+                : RunService.clientRunner(clients.key(aRequest));
+        // security review M1 / REST review #1: one run per runner; the export under the
+        // workspace lock, the worker outside it — a run never blocks the user's other requests
+        try (RunService.Ticket ticket = runs.admit(runner, anonymous))
         {
-            RunReport report = runs.run(v.source(), path, aBody.content(), aBody.docs(),
-                    scenarioPath, aBody.scenarioContent(), anonymousKey);
-            return new Dtos.RunResult(v.branch(), v.head(), report);
-        });
+            ExportedRun exported = access.read(aUser, aRequest,
+                    v -> new ExportedRun(v.branch(), v.head(), runs.prepare(v.source(), path,
+                            aBody.content(), aBody.docs(), scenarioPath, aBody.scenarioContent())));
+            RunReport report = runs.execute(exported.run(), ticket);
+            return new Dtos.RunResult(exported.branch(), exported.head(), path, scenarioPath,
+                    report);
+        }
+    }
+
+    /** A run exported under the lock, with the view's coordinates. */
+    record ExportedRun(String branch, String head, RunService.PreparedRun run)
+    {
     }
 
     // ---- helpers --------------------------------------------------------------------------
-
 
     private void requireContent(@Nullable String aContent)
     {

@@ -29,6 +29,11 @@ import org.springframework.stereotype.Component;
  * still works (scope universe empty, {@code storeAvailable=false} on the wire), a scenario needing
  * the store fails with the engine's own reason. Nothing replaces or rewrites the file.
  * </p>
+ *
+ * <p>
+ * {@link #unavailableReason()} is served to every client ({@code /api/info}): it names the store by
+ * its file name, never by the server's path (security review L8); the log has the path.
+ * </p>
  */
 @Component
 public final class EngineStore implements AutoCloseable
@@ -65,7 +70,8 @@ public final class EngineStore implements AutoCloseable
         }
         else if (!Files.isRegularFile(aPath))
         {
-            reason = "metadata store not found: " + aPath;
+            reason = "the configured metadata store file does not exist";
+            LOG.warn("metadata store not found: {}", aPath);
         }
         else
         {
@@ -76,11 +82,12 @@ public final class EngineStore implements AutoCloseable
             catch (StoreFormatException e)
             {
                 mismatch = true;
-                reason = "metadata store refused: " + e.getMessage();
+                reason = "metadata store refused: " + withoutDirectory(e.describe(), aPath);
             }
             catch (IOException e)
             {
-                reason = "metadata store unreadable: " + e.getMessage();
+                reason = "the configured metadata store is unreadable";
+                LOG.warn("metadata store {} unreadable", aPath, e);
             }
         }
         store = opened;
@@ -96,6 +103,19 @@ public final class EngineStore implements AutoCloseable
         {
             LOG.warn("engine runs WITHOUT a metadata store: {}", reason);
         }
+    }
+
+
+    /**
+     * A message with the store's absolute path replaced by its file name — the form a client may
+     * see (security review L8).
+     */
+    public static String withoutDirectory(String aMessage, Path aPath)
+    {
+        Path name = aPath.getFileName();
+        return name == null ? aMessage
+                : aMessage.replace(aPath.toAbsolutePath().toString(), name.toString())
+                        .replace(aPath.toString(), name.toString());
     }
 
 

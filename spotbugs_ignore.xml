@@ -66,4 +66,15 @@
         <Bug pattern="CT_CONSTRUCTOR_THROW" />
     </Match>
 
+    <Match>
+        <!-- RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT: HttpServletRequest.changeSessionId() is
+             called FOR its side effect — the session id is rotated at login (§5.1.4, review
+             L1); the new id it returns is never needed (and never logged). SpotBugs infers "no
+             side effect" from the servlet wrapper it now sees on the class path
+             (RequestSizeFilter.Counted extends HttpServletRequestWrapper). -->
+        <Class name="net.cumba.corej.editor.session.LoginService" />
+        <Method name="login" />
+        <Bug pattern="RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT" />
+    </Match>
+
 </FindBugsFilter>

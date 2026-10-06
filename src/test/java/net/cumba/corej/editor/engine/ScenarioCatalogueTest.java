@@ -73,4 +73,23 @@ class ScenarioCatalogueTest
         assertNull(empty.coreId());
         assertNull(empty.expect());
     }
+
+
+    @Test
+    void anOverflowingCountIsNoCountNotAServerError()
+    {
+        // REST review #9: Integer.valueOf overflowed into a 500 without a code
+        ScenarioCatalogue.Scenario s = ScenarioCatalogue.describe("x.cdt", "p/x.cdt", """
+                #!RuleTest
+                #test X expect=violation domain=AE
+                #expectViolationCount 99999999999999999999
+                dataset AE
+                col A type=Char
+                ---
+                1
+                ---
+                """, 10);
+        assertNull(s.expectViolationCount());
+        assertEquals(List.of("AE"), s.datasets());
+    }
 }

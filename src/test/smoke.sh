@@ -167,6 +167,8 @@ server:
 editor:
   repository:
     url: http://127.0.0.1:$forge_port/acme/rules.git
+    # the fake forge has no TLS: a developer-run flag (https only by default)
+    allow-http: true
   forge:
     type: gitea
     api-url: http://127.0.0.1:$forge_port/api/v1

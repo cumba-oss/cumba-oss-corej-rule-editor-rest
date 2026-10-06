@@ -75,6 +75,9 @@ class EngineApiTest
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private EngineController engine;
+
     private static String code(MvcResult aResult) throws Exception
     {
         return body(aResult).path("code").asString();
@@ -244,6 +247,46 @@ class EngineApiTest
                 .andExpect(status().isOk()).andReturn();
         assertTrue(body(expectations).path("content").asString()
                 .contains("#expectViolationCount 1\n#expectViolationAt row=1 AEDECOD=HEADACHE\n"));
+        // a run's proposal sets the verdict too (REST review #2)
+        MvcResult verdict = mvc
+                .perform(json(post("/api/cdt/expectations"), s, csrf,
+                        "{\"content\":" + quote(RemoteRepo.SCENARIO_B_INVALID_TEXT)
+                                + ",\"lines\":[],\"expect\":\"noViolation\"}"))
+                .andExpect(status().isOk()).andReturn();
+        assertTrue(
+                body(verdict).path("content").asString().startsWith(
+                        "#!RuleTest\n#test CDISC-CG0270 expect=noViolation domain=AE\ndataset AE"),
+                body(verdict).toString());
+        // a splice addressed by index (REST review #6)
+        MvcResult byIndex = mvc.perform(json(post("/api/cdt/splice"), s, csrf,
+                "{\"content\":" + quote(RemoteRepo.SCENARIO_B_INVALID_TEXT) + ",\"dataset\":"
+                        + body(parsed).path("datasets").get(0) + ",\"index\":0}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult byName = mvc
+                .perform(json(post("/api/cdt/splice"), s, csrf,
+                        "{\"content\":" + quote(RemoteRepo.SCENARIO_B_INVALID_TEXT)
+                                + ",\"dataset\":" + body(parsed).path("datasets").get(0) + "}"))
+                .andExpect(status().isOk()).andReturn();
+        assertEquals(body(byName).path("content").asString(),
+                body(byIndex).path("content").asString(),
+                "block #0 by index is the first block by name");
+        assertEquals("CDT_UNREPRESENTABLE", code(mvc.perform(json(post("/api/cdt/splice"), s, csrf,
+                "{\"content\":" + quote(RemoteRepo.SCENARIO_B_INVALID_TEXT) + ",\"dataset\":"
+                        + body(parsed).path("datasets").get(0) + ",\"index\":3}"))
+                .andExpect(status().isBadRequest()).andReturn()));
+    }
+
+
+    @Test
+    void theFunctionCatalogueCacheIsBounded()
+    {
+        // REST review #11: one entry per distinct functions.md text, unbounded
+        for (int i = 0; i < EngineController.MAX_FUNCTION_CATALOGUES + 5; i++)
+        {
+            engine.functions("# functions " + i + "\n");
+        }
+        assertTrue(engine.cachedFunctionCatalogues() <= EngineController.MAX_FUNCTION_CATALOGUES,
+                "bounded: " + engine.cachedFunctionCatalogues());
     }
 
 
@@ -264,6 +307,12 @@ class EngineApiTest
         assertEquals("child", report.path("worker").asString());
         assertEquals(2, report.path("findings").size(), "the unsaved buffer ran: two findings");
         assertEquals(2, report.path("expectations").path("count").asInt());
+        assertEquals("violation", report.path("expectations").path("expect").asString());
+        assertEquals("#test CDISC-CG0270 expect=violation domain=AE",
+                report.path("expectations").path("testLine").asString());
+        assertEquals(RemoteRepo.SCENARIO_B_INVALID, body(run).path("scenarioPath").asString(),
+                "the result names the scenario it judged");
+        assertEquals(RemoteRepo.CHECK_B, body(run).path("path").asString());
         assertFalse(report.path("reportJson").asString().isEmpty());
         // the saved file is untouched: a read-only user never writes (O12)
         mvc.perform(

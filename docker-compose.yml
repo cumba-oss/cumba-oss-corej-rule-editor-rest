@@ -17,6 +17,14 @@
 # http://localhost:8080/. The repository is never bundled: every user's workspace is a
 # clone fetched with THEIR token (§5.1.5–5.1.6).
 #
+# ⚠ HTTPS (security review M3). The SPA's nginx speaks plain HTTP and is published on the
+# LOOPBACK only (127.0.0.1): the forge token lives in the session, and its cookie is
+# Secure. To serve other machines, put a TLS-terminating reverse proxy in front of port
+# ${WEB_PORT} (it also sets HSTS) — plain HTTP to anything but localhost is NOT supported.
+# Chrome and Firefox send a Secure cookie to http://localhost, so a trial on this machine
+# works as it is. Trial opt-out ONLY, for a throw-away instance: COOKIE_SECURE=false (and,
+# to reach it from elsewhere, edit the port binding) — never for real tokens.
+#
 # ⚠ THE METADATA STORE. Everything that needs CDISC Library content — the analysis,
 # completion, tooltips, the scenario runs — reads OUR metadata store, never the
 # Library's pickle or web API (databrowser-meta CLAUDE.md). The store is NOT shipped:
@@ -56,6 +64,13 @@ services:
       EDITOR_RUN_MAX_HEAP: ${EDITOR_RUN_MAX_HEAP:-1g}
       EDITOR_RUN_MAX_CONCURRENT: ${EDITOR_RUN_MAX_CONCURRENT:-2}
       EDITOR_RUN_TIMEOUT: ${EDITOR_RUN_TIMEOUT:-PT60S}
+      # The session cookie is Secure (see the HTTPS note above); false is a trial opt-out only.
+      SERVER_SERVLET_SESSION_COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # Only nginx reaches this container (its port is not published), from the compose
+      # network's private range: believe its X-Forwarded-For for the per-client limits
+      # (logins, anonymous runs and searches — security review M4). Narrow it to the
+      # network's subnet if you know it.
+      EDITOR_TRUSTED_PROXIES: ${EDITOR_TRUSTED_PROXIES:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
     volumes:
       - workspaces:/var/lib/rule-editor/workspaces
       - metadata-store:/var/lib/rule-editor/metadata-store
@@ -70,7 +85,8 @@ services:
     depends_on:
       - rule-editor-rest
     ports:
-      - "${WEB_PORT:-8080}:80"
+      # the loopback only: plain HTTP never leaves this machine (see the HTTPS note above)
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
     restart: unless-stopped
 
 volumes:

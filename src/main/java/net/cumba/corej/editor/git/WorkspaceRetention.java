@@ -17,6 +17,13 @@ import org.springframework.stereotype.Component;
  * The retention sweep (§5.1.5): a workspace untouched for {@code editor.workspace.retention-days}
  * and holding nothing uncommitted or unpushed is deleted; disk use is reported in the log. A
  * workspace with work in it is never deleted, however old. 0 days disables the sweep.
+ *
+ * <p>
+ * The check and the deletion happen in ONE hold of the workspace's lock (security review L10): a
+ * save between "nothing in it" and the delete cannot be lost. A workspace whose lock is held right
+ * now is in use and kept for the next sweep; a request that obtained it before the deletion finds
+ * it retired and reopens (a fresh clone — there was nothing in the old one).
+ * </p>
  */
 @Component
 public class WorkspaceRetention
@@ -87,9 +94,8 @@ public class WorkspaceRetention
         long bytes = 0;
         for (long id : workspaces.userIdsOnDisk())
         {
-            if (!retention.isZero() && expired(id, aNow))
+            if (!retention.isZero() && deleteIfExpired(id, aNow))
             {
-                workspaces.delete(id);
                 deleted.add(id);
             }
             else
@@ -102,35 +108,46 @@ public class WorkspaceRetention
     }
 
 
+    /** Checks and deletes under one lock hold; a workspace in use right now is kept. */
     @SuppressWarnings("PMD.CloseResource") // owned by the WorkspaceService
-    private boolean expired(long aUserId, Instant aNow) throws IOException
+    private boolean deleteIfExpired(long aUserId, Instant aNow) throws IOException
     {
         Workspace ws = workspaces.openQuietly(aUserId);
-        ws.lock().lock();
+        if (!ws.lock().tryLock())
+        {
+            return false; // a request holds it: in use, not expired
+        }
         try
         {
-            if (ws.lastUsed().plus(retention).isAfter(aNow))
+            if (!expired(ws, aNow))
             {
                 return false;
             }
-            if (!ws.status().isClean())
-            {
-                return false;
-            }
-            for (BranchInfo b : ws.branches())
-            {
-                UnpushedInfo u = b.unpushed();
-                if (u != null && u.unpushed() && !b.isDefault())
-                {
-                    return false;
-                }
-            }
+            workspaces.delete(aUserId);
             return true;
         }
         finally
         {
             ws.lock().unlock();
         }
+    }
+
+
+    private boolean expired(Workspace aWorkspace, Instant aNow) throws IOException
+    {
+        if (aWorkspace.lastUsed().plus(retention).isAfter(aNow) || !aWorkspace.status().isClean())
+        {
+            return false;
+        }
+        for (BranchInfo b : aWorkspace.branches())
+        {
+            UnpushedInfo u = b.unpushed();
+            if (u != null && u.unpushed() && !b.isDefault())
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
 

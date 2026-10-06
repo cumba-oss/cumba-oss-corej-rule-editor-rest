@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedSet;
@@ -40,11 +41,13 @@ final class VariableCatalogue
     {
         Map<String, Entry> entries = new LinkedHashMap<>();
         Map<String, List<ScopeEntry>> byProduct = new LinkedHashMap<>();
+        Set<String> inScopeDatasets = new LinkedHashSet<>();
         for (ScopeEntry e : aUniverse.entries())
         {
             if (e.inScope())
             {
                 byProduct.computeIfAbsent(e.productKey(), k -> new ArrayList<>()).add(e);
+                inScopeDatasets.add(e.dataset().toUpperCase(Locale.ROOT));
             }
         }
         for (Map.Entry<String, List<ScopeEntry>> p : byProduct.entrySet())
@@ -74,7 +77,8 @@ final class VariableCatalogue
         List<Analysis.Variable> out = new ArrayList<>(entries.size());
         for (Entry e : entries.values())
         {
-            List<String> concrete = e.classLevel ? concreteOf(e.name, datasetNames) : List.of();
+            List<String> concrete = e.classLevel ? concreteOf(e.name, datasetNames, inScopeDatasets)
+                    : List.of();
             out.add(new Analysis.Variable(e.name, e.label, e.type, e.core, e.role,
                     new ArrayList<>(e.codelists), new ArrayList<>(e.datasets),
                     new ArrayList<>(e.products), e.classLevel, concrete));
@@ -83,15 +87,25 @@ final class VariableCatalogue
     }
 
 
-    /** {@code --TERM} stands for every in-scope dataset variable {@code XXTERM}. */
-    static List<String> concreteOf(String aClassName, Collection<String> aDatasetNames)
+    /**
+     * {@code --TERM} stands for every in-scope dataset variable {@code XXTERM} whose prefix
+     * {@code XX} is an in-scope dataset (REST review #7: by suffix and length alone,
+     * {@code --ENDTC} listed {@code RFENDTC} — DM's reference date, not a domain's
+     * {@code --ENDTC}).
+     *
+     * @param aInScopeDatasets
+     *            the in-scope dataset names, upper-cased
+     */
+    static List<String> concreteOf(String aClassName, Collection<String> aDatasetNames,
+            Set<String> aInScopeDatasets)
     {
         String suffix = aClassName.substring(2);
         List<String> out = new ArrayList<>();
         for (String name : aDatasetNames)
         {
             if (name.length() == suffix.length() + 2 && name.endsWith(suffix)
-                    && !name.startsWith("--"))
+                    && !name.startsWith("--")
+                    && aInScopeDatasets.contains(name.substring(0, 2).toUpperCase(Locale.ROOT)))
             {
                 out.add(name);
             }

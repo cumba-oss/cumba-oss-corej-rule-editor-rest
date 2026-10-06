@@ -9,9 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import net.cumba.corej.editor.engine.EngineStore;
 import net.cumba.corej.editor.engine.PackageStandards;
 import net.cumba.corej.editor.git.ChangedFile;
+import net.cumba.corej.editor.git.CorpusSource;
 import net.cumba.corej.editor.testing.MapSource;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import net.cumba.corej.editor.testing.TestStore;
@@ -83,7 +87,7 @@ class CorpusAnalysisIndexTest
 
     static Access.View view(MapSource aSource, String aHead, Map<String, ChangedFile.Kind> aChanges)
     {
-        return new Access.View(aSource, "main", aHead, aChanges, false);
+        return new Access.View(aSource, aSource, "main", aHead, false, () -> aChanges);
     }
 
 
@@ -208,5 +212,128 @@ class CorpusAnalysisIndexTest
                 CorpusAnalysisIndex
                         .key(view(source, "h2", Map.of("pom.xml", ChangedFile.Kind.MODIFIED))),
                 "a change outside the corpus trees does not enter the key");
+    }
+
+
+    @Test
+    void concurrentRequestsForOneViewShareOneBuild() throws Exception
+    {
+        // REST review #5: no single-flight — every waiting request built the same index again
+        CorpusAnalysisIndex fresh = new CorpusAnalysisIndex(store, standards);
+        MapSource corpus = corpus();
+        CountDownLatch inBuild = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CorpusSource gated = new CorpusSource()
+        {
+
+            @Override
+            public Optional<byte[]> read(String aPath) throws IOException
+            {
+                inBuild.countDown();
+                try
+                {
+                    release.await();
+                }
+                catch (InterruptedException e)
+                {
+                    Thread.currentThread().interrupt();
+                }
+                return corpus.read(aPath);
+            }
+
+
+            @Override
+            public List<TreeEntry> list(String aDirectory)
+            {
+                return corpus.list(aDirectory);
+            }
+
+
+            @Override
+            public boolean exists(String aPath)
+            {
+                return corpus.exists(aPath);
+            }
+        };
+        CorpusAnalysisIndex.Request request = new CorpusAnalysisIndex.Request("h-sf", "h-sf",
+                Map.of(), gated);
+        AtomicReference<CorpusAnalysisIndex.Index> a = new AtomicReference<>();
+        AtomicReference<CorpusAnalysisIndex.Index> b = new AtomicReference<>();
+        Thread first = new Thread(() -> a.set(build(fresh, request)));
+        first.start();
+        inBuild.await();
+        Thread second = new Thread(() -> b.set(build(fresh, request)));
+        second.start();
+        Thread.sleep(300); // the second request is waiting for the first build
+        release.countDown();
+        first.join(30_000);
+        second.join(30_000);
+        assertSame(a.get(), b.get(), "one build, shared");
+        assertEquals(a.get().rules().size(), fresh.summarisedCount(), "every rule summarised once");
+    }
+
+
+    private static CorpusAnalysisIndex.Index build(CorpusAnalysisIndex aIndex,
+            CorpusAnalysisIndex.Request aRequest)
+    {
+        try
+        {
+            return aIndex.of(aRequest);
+        }
+        catch (IOException e)
+        {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+
+    @Test
+    void aSaveAtTheSameHeadRebuildsOnlyItsRuleAndEqualsAFullBuild() throws IOException
+    {
+        // REST review #5: every save rebuilt the whole corpus
+        CorpusAnalysisIndex incremental = new CorpusAnalysisIndex(store, standards);
+        MapSource source = corpus();
+        CorpusAnalysisIndex.Index clean = incremental.of(view(source, "h-inc", Map.of()));
+        int afterFull = incremental.summarisedCount();
+        assertEquals(clean.rules().size(), afterFull);
+        source.put(RemoteRepo.CHECK_B,
+                RemoteRepo.CHECK_B_TEXT.replace("AETERM == \"\"", "AETERM == \"X\""));
+        Map<String, ChangedFile.Kind> modified = Map.of(RemoteRepo.CHECK_B,
+                ChangedFile.Kind.MODIFIED);
+        CorpusAnalysisIndex.Index edited = incremental.of(view(source, "h-inc", modified));
+        assertEquals(afterFull + 1, incremental.summarisedCount(), "only CG0270 again");
+        CorpusAnalysisIndex.Index full = new CorpusAnalysisIndex(store, standards)
+                .of(view(source, "h-inc", modified));
+        assertEquals(full.rules(), edited.rules(), "the incremental index IS the full one");
+        assertTrue(edited.rules().get(RemoteRepo.RULE_B).checkText().contains("\"X\""));
+        // a new rule's check and scenario, then their discard (back to the clean state)
+        String newCheck = CorpusLayout.checkPath("CDISC", "CDISC-CG0272");
+        String newScenario = CorpusLayout.scenarioDir("CDISC", "CDISC-CG0272") + "/s.cdt";
+        source.put(newCheck, RemoteRepo.CHECK_B_TEXT.replace("CDISC-CG0270", "CDISC-CG0272"))
+                .put(newScenario, RemoteRepo.SCENARIO_B_INVALID_TEXT);
+        Map<String, ChangedFile.Kind> added = Map.of(RemoteRepo.CHECK_B, ChangedFile.Kind.MODIFIED,
+                newCheck, ChangedFile.Kind.UNTRACKED, newScenario, ChangedFile.Kind.UNTRACKED);
+        CorpusAnalysisIndex.Index withNew = incremental.of(view(source, "h-inc", added));
+        assertTrue(withNew.rules().get("CDISC-CG0272").hasScenarios());
+        assertEquals(
+                new CorpusAnalysisIndex(store, standards).of(view(source, "h-inc", added)).rules(),
+                withNew.rules());
+    }
+
+
+    @Test
+    void theIndexIsBuiltFromWhatTheLockedPartRead() throws IOException
+    {
+        // REST review #5: built outside the lock, so it must not read the live tree
+        MapSource source = corpus();
+        source.put(RemoteRepo.CHECK_B,
+                RemoteRepo.CHECK_B_TEXT.replace("AETERM == \"\"", "AETERM == \"SEEN\""));
+        CorpusAnalysisIndex.Request request = CorpusAnalysisIndex.prepare(
+                view(source, "h-snap", Map.of(RemoteRepo.CHECK_B, ChangedFile.Kind.MODIFIED)));
+        source.put(RemoteRepo.CHECK_B,
+                RemoteRepo.CHECK_B_TEXT.replace("AETERM == \"\"", "AETERM == \"LATER\""));
+        CorpusAnalysisIndex.Index idx = new CorpusAnalysisIndex(store, standards).of(request);
+        String text = idx.rules().get(RemoteRepo.RULE_B).checkText();
+        assertTrue(text.contains("SEEN") && !text.contains("LATER"), text);
     }
 }

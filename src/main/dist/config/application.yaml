@@ -13,8 +13,9 @@
 #  servlet:
 #    session:
 #      cookie:
-#        # Plain-HTTP deployments (a developer run, a proxy that terminates TLS
-#        # elsewhere) must relax this or the browser never sends the cookie back.
+#        # The cookie is Secure by default and stays so: serve HTTPS (a TLS-terminating
+#        # proxy). Plain HTTP to anything but localhost is NOT supported; false is a
+#        # trial opt-out for a throw-away instance only (security review M3).
 #        secure: false
 #        # Two apps on sibling subdomains of ONE site (PLAN-rule-editor §4.2 shape 2):
 #        # the cookie's domain must cover both.
@@ -34,3 +35,7 @@
 #    # are same-origin and need nothing here. A cross-SITE origin cannot work (§4.2).
 #    allowed-origins:
 #      - https://rule-editor.example.org
+#  # Behind a reverse proxy: its address (or CIDR block), so the per-client limits
+#  # (logins, anonymous runs and searches) count the client, not the proxy.
+#  trusted-proxies:
+#    - 10.0.0.5

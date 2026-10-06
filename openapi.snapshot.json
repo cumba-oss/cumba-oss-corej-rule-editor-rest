@@ -125,7 +125,12 @@
           "content" : {
             "type" : "string"
           },
+          "expect" : {
+            "description" : "the expect= the #test line gets: the run report's expectations.expect (violation | noViolation); null leaves the verdict",
+            "type" : "string"
+          },
           "lines" : {
+            "description" : "the #expectViolation* lines to write; required ([] clears them)",
             "items" : {
               "type" : "string"
             },
@@ -149,6 +154,11 @@
           },
           "dataset" : {
             "$ref" : "#/components/schemas/Dataset"
+          },
+          "index" : {
+            "description" : "the block's position in /api/cdt/parse's datasets (0-based); null addresses the first block of dataset.name — send it: a scenario may hold two blocks of one name",
+            "format" : "int32",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -593,11 +603,17 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "expect" : {
+            "type" : "string"
+          },
           "lines" : {
             "items" : {
               "type" : "string"
             },
             "type" : "array"
+          },
+          "testLine" : {
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -1124,8 +1140,16 @@
           "head" : {
             "type" : "string"
           },
+          "path" : {
+            "description" : "the rule's check path the run was asked for",
+            "type" : "string"
+          },
           "report" : {
             "$ref" : "#/components/schemas/RunReport"
+          },
+          "scenarioPath" : {
+            "description" : "the scenario the run judged",
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -1819,7 +1843,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Replace the #expectViolation* lines of a scenario text with the confirmed ones (take actual as expected)",
+        "summary" : "Replace the #expectViolation* lines of a scenario text with the confirmed ones and, with expect, set the #test line's expect= to the run's proposal (take actual as expected)",
         "tags" : [ "engine" ]
       }
     },
@@ -1877,7 +1901,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Rewrite one dataset block of a scenario text from the grid; everything else stays byte for byte (400 CDT_UNREPRESENTABLE with the engine's message)",
+        "summary" : "Rewrite one dataset block of a scenario text from the grid, addressed by its index (else the first block of its name); everything else stays byte for byte (400 CDT_UNREPRESENTABLE with the engine's message)",
         "tags" : [ "engine" ]
       }
     },
@@ -2007,7 +2031,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "The branch's authored rule schema (rule-check.schema.json) for key and enum completion and key tooltips; 404 NO_SCHEMA when the branch carries none",
+        "summary" : "The branch's authored rule schema (rule-check.schema.json) for key and enum completion and key tooltips; 404 NO_SCHEMA when the branch carries none, 422 SCHEMA_INVALID when its file is not JSON",
         "tags" : [ "engine" ]
       }
     },
@@ -2211,7 +2235,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Run one rule buffer against one scenario buffer in a child JVM worker (503 RUN_BUSY beyond the queue, 429 RATE_LIMITED for anonymous clients)",
+        "summary" : "Run one rule buffer against one scenario buffer in a child JVM worker: one run at a time per user or anonymous client (409 RUN_IN_PROGRESS), 503 RUN_BUSY beyond the queue, 503 WORKSPACE_BUSY when the workspace stays locked, 429 RATE_LIMITED for anonymous clients",
         "tags" : [ "engine" ]
       }
     },
@@ -2392,7 +2416,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Probe the forge with a personal access token and open a session; the token decides the mode (edit needs push rights AND a pushable token)",
+        "summary" : "Probe the forge with a personal access token and open a session; the token decides the mode (edit needs push rights AND a pushable token); 429 RATE_LIMITED beyond the per-client login limit; rotates the CSRF token",
         "tags" : [ "session" ]
       }
     },

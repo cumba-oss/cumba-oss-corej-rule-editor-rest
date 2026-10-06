@@ -1,6 +1,7 @@
 package net.cumba.corej.editor.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,11 +34,54 @@ class RepositoryCoordinatesTest
 
 
     @Test
-    void fileUrlsParseTheSameWay()
+    void fileUrlsParseTheSameWayWhenAllowed()
     {
-        RepositoryCoordinates c = RepositoryCoordinates.parse("file:///tmp/x/acme/rules.git");
+        RepositoryCoordinates c = RepositoryCoordinates.parse("file:///tmp/x/acme/rules.git", false,
+                true);
         assertEquals("acme", c.owner());
         assertEquals("rules", c.name());
+    }
+
+
+    @Test
+    void onlyHttpsUnlessTheInstallationAllowsMore()
+    {
+        // security review L3: http needs the developer flag, file the test flag
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.parse("http://forge.example.test/acme/rules.git"));
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.parse("file:///tmp/x/acme/rules.git"));
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.parse("file:///tmp/x/acme/rules.git", true, false));
+        assertEquals("acme", RepositoryCoordinates
+                .parse("http://forge.example.test/acme/rules.git", true, false).owner());
+        assertEquals("https://forge.example.test/api/v1",
+                RepositoryCoordinates.checkApiUrl(" https://forge.example.test/api/v1 ", false));
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.checkApiUrl("http://forge.example.test/api/v1", false));
+        assertEquals("http://127.0.0.1:1/api/v1",
+                RepositoryCoordinates.checkApiUrl("http://127.0.0.1:1/api/v1", true));
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.checkApiUrl("file:///api/v1", true));
+    }
+
+
+    @Test
+    void credentialsQueriesAndFragmentsAreRefusedAndNeverEchoed()
+    {
+        IllegalArgumentException creds = assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates
+                        .parse("https://mw:s3cret-token@forge.example.test/acme/rules.git"));
+        assertTrue(creds.getMessage().contains("user-info"), creds.getMessage());
+        assertFalse(creds.getMessage().contains("s3cret-token"), creds.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> RepositoryCoordinates
+                .parse("https://forge.example.test/acme/rules.git?ref=x"));
+        assertThrows(IllegalArgumentException.class, () -> RepositoryCoordinates
+                .parse("https://forge.example.test/acme/rules.git#main"));
+        assertThrows(IllegalArgumentException.class, () -> RepositoryCoordinates
+                .checkApiUrl("https://token@forge.example.test/api/v1", false));
+        assertThrows(IllegalArgumentException.class,
+                () -> RepositoryCoordinates.parse("https:///acme/rules.git"));
     }
 
 
@@ -51,6 +95,6 @@ class RepositoryCoordinatesTest
                 () -> RepositoryCoordinates.parse("https://forge.example.test/rules.git"));
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> RepositoryCoordinates.parse("ssh://git@host/a/b.git"));
-        assertTrue(e.getMessage().contains("http(s)"), e.getMessage());
+        assertTrue(e.getMessage().contains("https"), e.getMessage());
     }
 }

@@ -47,14 +47,23 @@ class EngineStoreTest
         try (EngineStore missing = new EngineStore(aDir.resolve("nope.zip")))
         {
             assertFalse(missing.available());
-            assertTrue(missing.unavailableReason().contains("not found"));
+            assertTrue(missing.unavailableReason().contains("does not exist"),
+                    missing.unavailableReason());
+            // security review L8: /api/info serves this text to everybody — no server path
+            assertFalse(missing.unavailableReason().contains(aDir.toString()),
+                    missing.unavailableReason());
         }
+        assertEquals("metadata store nope.zip is format 4",
+                EngineStore.withoutDirectory(
+                        "metadata store " + aDir.resolve("nope.zip") + " is format 4",
+                        aDir.resolve("nope.zip")));
         Path garbage = aDir.resolve("garbage.zip");
         Files.writeString(garbage, "not a zip");
         try (EngineStore bad = new EngineStore(garbage))
         {
             assertFalse(bad.available());
             assertFalse(bad.unavailableReason().isEmpty());
+            assertFalse(bad.unavailableReason().contains(aDir.toString()), bad.unavailableReason());
         }
         assertNull(EngineStore.resolve(" "), "blank defers to the engine's own resolution,"
                 + " which finds nothing in this test JVM");

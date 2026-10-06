@@ -14,15 +14,18 @@ server:
       # PLAN-rule-editor §5.1.4 (review L1): the forge token lives only in the server-side session.
       # A rule author's session must outlive a long editing afternoon: a 401 on Save keeps the
       # buffers in the browser and re-authenticates in a dialog (§5.2, review L4), so a long
-      # timeout costs nothing but memory. Sessions are never persisted across restarts.
+      # timeout costs nothing but memory. Sessions are never persisted across restarts. A
+      # session nobody has logged in to lives editor.limits.pre-login-session-timeout only.
       timeout: 8h
       persistent: false
       cookie:
         http-only: true
         same-site: lax
-        # Production serves HTTPS (phase 4 reverse proxy / TLS). A plain-HTTP developer run must
-        # override this or the browser never sends the cookie back:
-        #   --server.servlet.session.cookie.secure=false
+        # The forge token lives in the session: its cookie never crosses plain HTTP (security
+        # review M3). Serve HTTPS (a TLS-terminating reverse proxy, which also sets HSTS); plain
+        # HTTP to anything but localhost is NOT supported — Chrome and Firefox send a Secure
+        # cookie to http://localhost, so a local developer run works as it is. Trial opt-out
+        # ONLY, for a throw-away instance: --server.servlet.session.cookie.secure=false
         secure: true
   # No actuator, so no heapdump / env endpoint exists (§5.1.4). Nothing to disable.
 
@@ -36,8 +39,15 @@ springdoc:
 # git repository (O9); the forge behind it answers the login probe (§5.1.3).
 editor:
   repository:
-    # The clone URL. Owner and repository name are its last two path segments.
+    # The clone URL. Owner and repository name are its last two path segments. https only, and
+    # never with credentials, a query or a fragment in it (security review L3): /api/info shows
+    # it to everybody and every user's git operations use it.
     url: https://forge.example.org/owner/rules.git
+    # A developer run against a forge without TLS: http:// for this URL and the forge API.
+    # Off: the login token travels in every git and API request.
+    allow-http: false
+    # file:// repositories — tests only.
+    allow-file: false
     # Blank = the branch the forge reports as the repository's default at login (anonymous mode
     # reads the remote HEAD instead). Set it only to pin a different branch as "default".
     default-branch:
@@ -54,6 +64,12 @@ editor:
     retention-days: 90
     # How often the retention sweep runs (ISO-8601 duration).
     retention-interval: PT6H
+    # The EMPTY directory every clone's core.hooksPath names (§5.8.3); blank =
+    # <workspace-root>/.hooks-disabled. The container image points it at a root-owned,
+    # read-only directory (security review L4).
+    hooks-dir:
+    # The transport timeout of every clone, fetch, push and ls-remote (security review L11).
+    git-timeout: PT60S
   anonymous:
     # Opt-in for a PUBLIC repository only (RE-Q12, §5.1.6): a server-owned clone of the default
     # branch is served read-only to unauthenticated users. Every refresh re-probes anonymous
@@ -61,6 +77,10 @@ editor:
     enabled: false
     # How often the anonymous clone is refreshed from the remote (ISO-8601 duration).
     refresh-interval: PT10M
+    # Anonymous searches per minute per client (beyond that 429 RATE_LIMITED; 0 = no limit),
+    # and the most hits one anonymous search answers (security review L12).
+    searches-per-minute: 30
+    max-search-results: 50
   cors:
     # The deployment shapes of §4.2: (1) the SPA bundled into this jar (-Pbundle-web) and (2) the
     # SPA behind a reverse proxy that forwards /api are SAME-ORIGIN and need nothing here. Only
@@ -70,6 +90,12 @@ editor:
     # answered. ⛔ A cross-SITE deployment is not supported (SameSite=Lax cookie, session-bound
     # CSRF token).
     allowed-origins: []
+  # The reverse proxies (addresses or CIDR blocks) whose X-Forwarded-For is believed when a
+  # per-client limit keys a request — logins, anonymous runs and searches (security review M4):
+  # the right-most forwarded hop that is not one of them is the client; an IPv6 client counts by
+  # its /64. Empty: the TCP peer is the client, so behind a proxy every client shares one key.
+  # docker-compose.yml lists the private ranges (only nginx can reach the API there).
+  trusted-proxies: []
   # ---- the engine (phase 3) -------------------------------------------------------------
   # The metadata store file every analysis, completion, tooltip and run reads (databrowser-meta
   # CLAUDE.md: CDISC Library content comes ONLY from our store; the editor never seeds). Blank =
@@ -86,17 +112,43 @@ editor:
     max-concurrent: 2
     max-queued: 4
     queue-wait: PT30S
+    # One run at a time per user (all their sessions) or anonymous client: 409 RUN_IN_PROGRESS.
+    # A run exports the buffers under the workspace lock and runs OUTSIDE it (security review
+    # M1): the user's other requests are served while a worker runs.
     # Anonymous mode only: runs per minute per client address, beyond that 429 RATE_LIMITED.
     anonymous-runs-per-minute: 6
+    # Anonymous runs have a pool of their own (security review M4) — never an author's worker:
+    # this many workers, this many waiting (then 503 RUN_BUSY), and a shorter timeout.
+    anonymous-max-concurrent: 1
+    anonymous-max-queued: 2
+    anonymous-timeout: PT20S
     # The worker's class path and java; blank derives both from this JVM (under the
     # bootstrap launcher: <bundle>/lib/*). Set them only for an unusual layout.
     classpath:
     java-command:
     # How much of a worker's stderr is kept for the server log when it fails.
     worker-log-bytes: 16384
+    # The largest report a worker may answer; a worker writing more is killed and the run is
+    # ABORTED TOO_LARGE (security review M5). A worker inherits only PATH, the temp, locale and
+    # time-zone variables of this process (security review L4), and halts itself when this
+    # process is gone or it outlived the timeout (L5).
+    max-report-bytes: 33554432
   limits:
     # Analysed and run buffers (a rule, a scenario) above this answer 413 TOO_LARGE.
     max-buffer-bytes: 1048576
+    # A request body above this answers 413 TOO_LARGE before anyone reads it (security review
+    # M2); 0 = four buffers' worth (a run carries three, JSON-escaped). A proxy in front must
+    # accept at least this much (the SPA's nginx: client_max_body_size).
+    max-request-bytes: 0
+    # How long a request waits for its workspace's lock (another request of the same user — a
+    # push, a fetch, a switch) before it answers 503 WORKSPACE_BUSY (security review M1).
+    workspace-lock-wait: PT30S
+    # Login attempts per minute per client, beyond that 429 RATE_LIMITED (security review L9:
+    # each login costs the forge two or three requests); 0 = no limit.
+    logins-per-minute: 10
+    # The lifetime of a session nobody has logged in to yet (GET /api/session/csrf creates it,
+    # security review L2); the login raises it to server.servlet.session.timeout.
+    pre-login-session-timeout: PT15M
 
 logging:
   level:
