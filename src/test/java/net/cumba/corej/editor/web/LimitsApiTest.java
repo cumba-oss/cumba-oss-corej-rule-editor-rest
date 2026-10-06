@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import jakarta.servlet.ServletContext;
 import net.cumba.corej.editor.HomeStaysCleanExtension;
 import net.cumba.corej.editor.engine.Json;
 import net.cumba.corej.editor.testing.FakeForge;
@@ -23,12 +24,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.AbstractMockHttpServletRequestBuilder;
 
 /**
  * The request-level limits and the session hardening through the security chain: the read gate
@@ -111,6 +115,63 @@ class LimitsApiTest
         MvcResult b = mvc.perform(json(post("/api/analyse"), s, token, buffer)).andReturn();
         assertEquals(413, b.getResponse().getStatus());
         assertTrue(body(b).path("detail").asString().contains("content is"), body(b).toString());
+    }
+
+    /** A POST that declares no length — a chunked upload, which the filter must count. */
+    static final class Undeclared extends AbstractMockHttpServletRequestBuilder<Undeclared>
+    {
+
+        Undeclared(String aUri)
+        {
+            super(HttpMethod.POST);
+            uri(aUri);
+        }
+
+
+        @Override
+        protected MockHttpServletRequest createServletRequest(ServletContext aContext)
+        {
+            return new MockHttpServletRequest(aContext)
+            {
+
+                @Override
+                public long getContentLengthLong()
+                {
+                    return -1;
+                }
+
+
+                @Override
+                public int getContentLength()
+                {
+                    return -1;
+                }
+            };
+        }
+    }
+
+    @Test
+    void aBodyWithoutALengthIsCountedAndCutOffAt413() throws Exception
+    {
+        // review: the counting stream (no Content-Length) through the whole chain
+        MockHttpSession s = login(mvc, "mw", FakeForge.WRITE_TOKEN);
+        String token = csrf(mvc, s);
+        String big = "{\"path\":\"" + RemoteRepo.CHECK_B + "\",\"content\":"
+                + Json.write("#".repeat(5 * MAX_BUFFER)) + "}";
+        MvcResult r = mvc.perform(new Undeclared("/api/analyse").session(s)
+                .header(CSRF_HEADER, token).contentType(MediaType.APPLICATION_JSON).content(big))
+                .andReturn();
+        assertEquals(413, r.getResponse().getStatus(), r.getResponse().getContentAsString());
+        assertEquals("TOO_LARGE", code(r));
+        // a body under the limit, undeclared too, is read normally
+        MvcResult small = mvc
+                .perform(new Undeclared("/api/analyse").session(s).header(CSRF_HEADER, token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"path\":\"" + RemoteRepo.CHECK_B + "\",\"content\":"
+                                + Json.write(RemoteRepo.CHECK_B_TEXT.substring(0, 200)) + "}"))
+                .andReturn();
+        assertEquals(200, small.getResponse().getStatus(),
+                small.getResponse().getContentAsString());
     }
 
 

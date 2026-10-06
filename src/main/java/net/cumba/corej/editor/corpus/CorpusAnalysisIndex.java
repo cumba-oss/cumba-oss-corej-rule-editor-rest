@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -428,30 +429,49 @@ public class CorpusAnalysisIndex
                 paths.add(e.getKey());
             }
         }
-        Map<String, String> touched = new TreeMap<>(); // rule id -> family, when known
+        Set<String> touched = new TreeSet<>();
         for (String path : paths)
         {
-            RuleRef ref = ruleOf(path, aBase);
-            if (ref == null)
+            String id = ruleOf(path);
+            if (id == null)
             {
                 return null;
             }
-            if (ref.family() != null || !touched.containsKey(ref.id()))
-            {
-                touched.put(ref.id(), ref.family());
-            }
+            touched.add(id);
         }
         if (touched.size() > MAX_INCREMENTAL_RULES)
         {
             return null;
         }
-        Map<String, RuleSummary> rules = new TreeMap<>(aBase.rules());
-        for (Map.Entry<String, String> t : touched.entrySet())
+        // The family of a touched rule is the one the FULL build would read it from — whichever
+        // family directory holds its check NOW — never the family of the last changed path (a
+        // rule moved between families changes a path in each). A rule in two families at once is
+        // the full build's business (its last family wins there): rebuild fully.
+        List<String> families = new ArrayList<>();
+        for (CorpusSource.TreeEntry familyDir : aRequest.source().list(CorpusLayout.CHECKS))
         {
-            String id = t.getKey();
-            String family = t.getValue();
+            if (familyDir.directory())
+            {
+                families.add(familyDir.name());
+            }
+        }
+        Map<String, RuleSummary> rules = new TreeMap<>(aBase.rules());
+        for (String id : touched)
+        {
+            String family = null;
+            for (String f : families)
+            {
+                if (aRequest.source().exists(CorpusLayout.checkPath(f, id)))
+                {
+                    if (family != null)
+                    {
+                        return null;
+                    }
+                    family = f;
+                }
+            }
             rules.remove(id);
-            if (family != null && aRequest.source().exists(CorpusLayout.checkPath(family, id)))
+            if (family != null)
             {
                 rules.put(id, summarise(aRequest.source(), family, id));
             }
@@ -459,12 +479,9 @@ public class CorpusAnalysisIndex
         return assemble(rules, aRequest.source(), aRequest.head(), aRequest.changeHashes());
     }
 
-    /** A rule a changed path belongs to; the family when the path or the base names it. */
-    private record RuleRef(String id, @Nullable String family)
-    {
-    }
 
-    private static @Nullable RuleRef ruleOf(String aPath, Index aBase)
+    /** The rule a changed corpus path belongs to, or {@code null} when it is no rule's file. */
+    private static @Nullable String ruleOf(String aPath)
     {
         for (String tree : List.of(CorpusLayout.CHECKS, CorpusLayout.DOCS))
         {
@@ -476,20 +493,15 @@ public class CorpusAnalysisIndex
                 {
                     return null;
                 }
-                return new RuleRef(CorpusLayout.ruleId(parts[1]), parts[0]);
+                return CorpusLayout.ruleId(parts[1]);
             }
         }
         String prefix = CorpusLayout.SCENARIOS + "/";
         if (aPath.startsWith(prefix))
         {
-            // <scenarios>/<family dir>/<RULE-ID>/<file>: the rule is the third-to-last segment
+            // <scenarios>/<family dir>/<RULE-ID>/<file>: the rule is the middle segment
             String[] parts = aPath.substring(prefix.length()).split("/", -1);
-            if (parts.length != 3)
-            {
-                return null;
-            }
-            RuleSummary known = aBase.rules().get(parts[1]);
-            return new RuleRef(parts[1], known == null ? null : known.family());
+            return parts.length == 3 ? parts[1] : null;
         }
         return null;
     }

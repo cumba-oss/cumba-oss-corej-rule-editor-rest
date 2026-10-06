@@ -94,7 +94,9 @@ editor:
   # per-client limit keys a request — logins, anonymous runs and searches (security review M4):
   # the right-most forwarded hop that is not one of them is the client; an IPv6 client counts by
   # its /64. Empty: the TCP peer is the client, so behind a proxy every client shares one key.
-  # docker-compose.yml lists the private ranges (only nginx can reach the API there).
+  # Trust only the proxies' own addresses: a client inside a trusted block cannot be told from a
+  # proxy and could forge X-Forwarded-For for a fresh key per request. docker-compose.yml pins
+  # its network's subnet and trusts exactly that block.
   trusted-proxies: []
   # ---- the engine (phase 3) -------------------------------------------------------------
   # The metadata store file every analysis, completion, tooltip and run reads (databrowser-meta

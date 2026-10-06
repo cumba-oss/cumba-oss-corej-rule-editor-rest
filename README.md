@@ -102,7 +102,8 @@ itself off when the probe fails.
   `editor.limits.logins-per-minute` per client (`429 RATE_LIMITED`); anonymous searches to
   `editor.anonymous.searches-per-minute` with at most `max-search-results` hits. A *client* is the
   TCP peer, or — behind one of `editor.trusted-proxies` — the right-most untrusted
-  `X-Forwarded-For` hop; IPv6 counts by its `/64`.
+  `X-Forwarded-For` hop; IPv6 counts by its `/64`. Trust only the proxies' own addresses: a
+  client inside a trusted block cannot be told from a proxy.
 - **No server path in an answer** — an I/O failure answers a generic text, a 5xx message has the
   workspace root replaced by `<workspaces>`, the store's reason names its file only.
 
@@ -289,9 +290,12 @@ own. No corpus directory is shipped: the rules come from git, per user.
    `EDITOR_RUN_MAX_HEAP` × `EDITOR_RUN_MAX_CONCURRENT` on top of `JAVA_OPTS`. Secure by default
    (security review M3): the nginx port is published on `127.0.0.1` only and the cookie is
    `Secure` — put a TLS-terminating proxy in front to serve other machines; `COOKIE_SECURE=false`
-   is a trial opt-out for a throw-away instance only. `EDITOR_TRUSTED_PROXIES` (the private
-   ranges by default — only nginx reaches the API) makes the per-client limits count clients, not
-   nginx. The SPA's nginx must accept bodies up to `editor.limits.max-request-bytes` (4 MiB by
+   is a trial opt-out for a throw-away instance only. `EDITOR_TRUSTED_PROXIES` (by default exactly the
+   compose network's pinned subnet, `172.28.40.0/24` — change both together) makes the per-client
+   limits count clients, not nginx. ⚠ A client inside a trusted block cannot be told from a proxy
+   (it could forge `X-Forwarded-For` for a fresh limit key per request), so never trust a wider
+   range; the network's gateway is inside the block, so the TLS proxy on the host must append
+   the real client to `X-Forwarded-For`. The SPA's nginx must accept bodies up to `editor.limits.max-request-bytes` (4 MiB by
    default).
 
 ### The smoke test

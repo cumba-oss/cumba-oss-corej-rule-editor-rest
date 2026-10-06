@@ -1,5 +1,6 @@
 package net.cumba.corej.editor;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -7,8 +8,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * The container defaults are secure (security review M3, L4) — a shape check of the two files,
@@ -48,5 +54,33 @@ class DeploymentDefaultsTest
         assertFalse(compose.contains("\"${WEB_PORT:-8080}:80\""), "never every interface");
         assertTrue(compose.contains("SERVER_SERVLET_SESSION_COOKIE_SECURE: ${COOKIE_SECURE:-true}"),
                 "the trial opt-out is explicit and off by default");
+    }
+
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theComposeFileTrustsOnlyItsPinnedNetwork() throws IOException
+    {
+        // review: the default trusted every private range, so a client inside one could forge
+        // X-Forwarded-For and get a fresh limit key per request
+        Map<String, Object> compose = new Yaml().load(read("docker-compose.yml"));
+        Map<String, Object> networks = (Map<String, Object>) compose.get("networks");
+        Map<String, Object> editor = (Map<String, Object>) networks.get("editor");
+        Map<String, Object> ipam = (Map<String, Object>) editor.get("ipam");
+        List<Map<String, Object>> config = (List<Map<String, Object>>) ipam.get("config");
+        String subnet = String.valueOf(config.get(0).get("subnet"));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> rest = (Map<String, Object>) services.get("rule-editor-rest");
+        Map<String, Object> env = (Map<String, Object>) rest.get("environment");
+        Matcher m = Pattern.compile("\\$\\{EDITOR_TRUSTED_PROXIES:-(.*)}")
+                .matcher(String.valueOf(env.get("EDITOR_TRUSTED_PROXIES")));
+        assertTrue(m.matches(), String.valueOf(env.get("EDITOR_TRUSTED_PROXIES")));
+        assertEquals(subnet, m.group(1), "the default trusts exactly the pinned subnet");
+        for (String service : List.of("rule-editor-rest", "rule-editor-web"))
+        {
+            assertEquals(List.of("editor"),
+                    ((Map<String, Object>) services.get(service)).get("networks"),
+                    service + " joins the pinned network");
+        }
     }
 }

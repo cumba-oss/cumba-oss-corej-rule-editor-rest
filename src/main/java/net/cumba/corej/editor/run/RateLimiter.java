@@ -5,12 +5,22 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
  * A per-key sliding-window limit: at most {@code aLimit} events per {@code aWindow} — the anonymous
- * run limit per client address (PLAN-rule-editor §5.8.5). Keys that saw nothing in a window are
- * dropped on the next touch, so the map does not grow with every address ever seen.
+ * run and search limits and the login limit per client (PLAN-rule-editor §5.8.5, security review
+ * M4, L9, L12).
+ *
+ * <p>
+ * Each key's window is updated atomically inside {@code ConcurrentHashMap.compute} (the earlier
+ * check-then-act could record an event into a window another thread had just removed — a lost
+ * event, so one more grant than the limit), and a key whose window empties is removed by the same
+ * atomic step. Keys that saw nothing for a window are swept at most once per window, not on every
+ * call (that was O(keys) per request).
+ * </p>
  */
 public final class RateLimiter
 {
@@ -23,6 +33,10 @@ public final class RateLimiter
 
     private final Map<String, Deque<Long>> events = new ConcurrentHashMap<>();
 
+    private final AtomicLong lastSweep;
+
+    private final AtomicInteger sweeps = new AtomicInteger();
+
     public RateLimiter(int aLimit, Duration aWindow)
     {
         this(aLimit, aWindow, System::nanoTime);
@@ -34,6 +48,7 @@ public final class RateLimiter
         limit = aLimit;
         windowNanos = aWindow.toNanos();
         clock = aClock;
+        lastSweep = new AtomicLong(aClock.getAsLong());
     }
 
 
@@ -45,30 +60,62 @@ public final class RateLimiter
             return true;
         }
         long now = clock.getAsLong();
-        Deque<Long> q = events.computeIfAbsent(aKey, k -> new ArrayDeque<>());
-        synchronized (q)
+        sweep(now);
+        boolean[] granted = new boolean[1];
+        events.compute(aKey, (k, window) ->
         {
-            while (!q.isEmpty() && now - q.peekFirst() >= windowNanos)
+            Deque<Long> q = window == null ? new ArrayDeque<>() : window;
+            expire(q, now);
+            if (q.size() < limit)
             {
-                q.pollFirst();
+                q.addLast(now);
+                granted[0] = true;
             }
-            if (q.size() >= limit)
-            {
-                return false;
-            }
-            q.addLast(now);
-        }
-        events.entrySet().removeIf(e -> e.getValue() != q && stale(e.getValue(), now));
-        return true;
+            return q.isEmpty() ? null : q;
+        });
+        return granted[0];
     }
 
 
-    private boolean stale(Deque<Long> aQueue, long aNow)
+    private void expire(Deque<Long> aWindow, long aNow)
     {
-        synchronized (aQueue)
+        while (!aWindow.isEmpty() && aNow - aWindow.peekFirst() >= windowNanos)
         {
-            Long last = aQueue.peekLast();
-            return last == null || aNow - last >= windowNanos;
+            aWindow.pollFirst();
         }
+    }
+
+
+    /** Drops the keys whose window emptied — at most once per window, by one caller. */
+    private void sweep(long aNow)
+    {
+        long last = lastSweep.get();
+        if (aNow - last < windowNanos || !lastSweep.compareAndSet(last, aNow))
+        {
+            return;
+        }
+        sweeps.incrementAndGet();
+        for (String key : events.keySet())
+        {
+            events.computeIfPresent(key, (k, window) ->
+            {
+                expire(window, aNow);
+                return window.isEmpty() ? null : window;
+            });
+        }
+    }
+
+
+    /** How many keys are tracked (tests). */
+    int keys()
+    {
+        return events.size();
+    }
+
+
+    /** How many sweeps ran (tests). */
+    int sweeps()
+    {
+        return sweeps.get();
     }
 }

@@ -318,6 +318,26 @@ class CorpusAnalysisIndexTest
         assertEquals(
                 new CorpusAnalysisIndex(store, standards).of(view(source, "h-inc", added)).rules(),
                 withNew.rules());
+        // a rule MOVED between families, copy then delete: the family is the one holding the
+        // check now (review: the incremental build took the last changed path's family, and the
+        // deleted CDISC path sorts after the new ADAM one)
+        CorpusAnalysisIndex moving = new CorpusAnalysisIndex(store, standards);
+        MapSource moved = corpus();
+        moving.of(view(moved, "h-move", Map.of()));
+        String adam = CorpusLayout.checkPath("ADAM", RemoteRepo.RULE_B);
+        moved.put(adam, RemoteRepo.CHECK_B_TEXT);
+        Map<String, ChangedFile.Kind> copied = Map.of(adam, ChangedFile.Kind.UNTRACKED);
+        CorpusAnalysisIndex.Index both = moving.of(view(moved, "h-move", copied));
+        assertEquals(
+                new CorpusAnalysisIndex(store, standards).of(view(moved, "h-move", copied)).rules(),
+                both.rules(), "in two families at once: the full build's answer");
+        moved.remove(RemoteRepo.CHECK_B);
+        Map<String, ChangedFile.Kind> deleted = Map.of(adam, ChangedFile.Kind.UNTRACKED,
+                RemoteRepo.CHECK_B, ChangedFile.Kind.DELETED);
+        CorpusAnalysisIndex.Index after = moving.of(view(moved, "h-move", deleted));
+        assertEquals("ADAM", after.rules().get(RemoteRepo.RULE_B).family());
+        assertEquals(new CorpusAnalysisIndex(store, standards).of(view(moved, "h-move", deleted))
+                .rules(), after.rules(), "moved: the incremental index IS the full one");
     }
 
 

@@ -66,17 +66,22 @@ services:
       EDITOR_RUN_TIMEOUT: ${EDITOR_RUN_TIMEOUT:-PT60S}
       # The session cookie is Secure (see the HTTPS note above); false is a trial opt-out only.
       SERVER_SERVLET_SESSION_COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      # Only nginx reaches this container (its port is not published), from the compose
-      # network's private range: believe its X-Forwarded-For for the per-client limits
-      # (logins, anonymous runs and searches — security review M4). Narrow it to the
-      # network's subnet if you know it.
-      EDITOR_TRUSTED_PROXIES: ${EDITOR_TRUSTED_PROXIES:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
+      # Believe X-Forwarded-For (for the per-client limits: logins, anonymous runs and
+      # searches — security review M4) only from the compose network pinned below, where
+      # nginx lives — NEVER from every private range: a client in a trusted block cannot be
+      # told from a proxy and would get a fresh limit key per request by forging the header.
+      # ⚠ The network's gateway is in the block too: whatever reaches nginx from the host
+      # (your TLS proxy — the port is bound to the loopback) is believed as well, so that
+      # proxy must append the real client to X-Forwarded-For. Keep this equal to the subnet.
+      EDITOR_TRUSTED_PROXIES: ${EDITOR_TRUSTED_PROXIES:-172.28.40.0/24}
     volumes:
       - workspaces:/var/lib/rule-editor/workspaces
       - metadata-store:/var/lib/rule-editor/metadata-store
     # Not published: only nginx talks to it. Uncomment to reach the API directly.
     # ports:
     #   - "8081:8081"
+    networks:
+      - editor
     restart: unless-stopped
 
   rule-editor-web:
@@ -87,8 +92,18 @@ services:
     ports:
       # the loopback only: plain HTTP never leaves this machine (see the HTTPS note above)
       - "127.0.0.1:${WEB_PORT:-8080}:80"
+    networks:
+      - editor
     restart: unless-stopped
 
 volumes:
   workspaces:
   metadata-store:
+
+networks:
+  editor:
+    ipam:
+      config:
+        # Pinned so EDITOR_TRUSTED_PROXIES can name exactly this block (security review M4).
+        # If it collides with a network of the host, change it AND EDITOR_TRUSTED_PROXIES.
+        - subnet: 172.28.40.0/24
