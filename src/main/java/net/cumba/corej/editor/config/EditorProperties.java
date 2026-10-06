@@ -753,8 +753,8 @@ public class EditorProperties
     {
 
         /**
-         * The brand's name; {@code EDITOR_BRAND_NAME} ({@code EDITOR_BRAND} maps to this object and
-         * refuses to start).
+         * The brand's name; {@code EDITOR_BRAND_NAME} ({@code EDITOR_BRAND} names this object,
+         * selects nothing, and {@link BrandResourceConfig} refuses start-up on it).
          */
         private String name = "neutral";
 

@@ -19,8 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.ResourceLoader;
@@ -31,8 +33,10 @@ import org.springframework.core.io.ResourceLoader;
  * available names, an API-only build mapping nothing — and the environment variable through the
  * real binding path: {@code EDITOR_BRAND_NAME} binds, {@code EDITOR_BRAND} does not (review H1:
  * with no placeholder in {@code application.yaml}, relaxed binding maps it to {@code editor.brand}
- * itself, which the binder cannot convert a string into — measured: the context REFUSES TO START
- * with "Could not bind properties", so the typo is loud, never a silent {@code neutral}).
+ * itself; with the shipped {@code application.yaml} supplying {@code name} and {@code directory}
+ * the binder silently drops the string — measured in review round 1 (HIGH-1): without a guard the
+ * service started and served {@code neutral}. {@link BrandResourceConfig} refuses the stray value,
+ * so the typo is loud).
  *
  * <p>
  * The test classpath carries a synthetic bundled SPA: {@code static/index.html} and
@@ -141,7 +145,22 @@ class BrandResourceConfigTest
         ResourceLoader loader = apiOnlyLoader();
         assertNull(BrandResourceConfig.resolve(brand("nope", null), loader));
         assertNull(BrandResourceConfig.resolve(brand("../x", null), loader));
-        assertTrue(new BrandResourceConfig(brand("nope", null), loader).location().isEmpty());
+        assertTrue(new BrandResourceConfig(brand("nope", null), loader, new StandardEnvironment())
+                .location().isEmpty());
+        // the stray object value is refused even in an API-only build
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> new BrandResourceConfig(brand("neutral", null), loader,
+                        environmentWith("EDITOR_BRAND", "p300")));
+        assertTrue(e.getMessage().contains("EDITOR_BRAND_NAME"), e.getMessage());
+    }
+
+
+    private static StandardEnvironment environmentWith(String aName, String aValue)
+    {
+        StandardEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "test-systemEnvironment", Map.of(aName, aValue)));
+        return environment;
     }
 
     @Configuration
@@ -154,8 +173,12 @@ class BrandResourceConfigTest
     {
         return new ApplicationContextRunner()
                 .withUserConfiguration(Properties.class, BrandResourceConfig.class)
+                // the SHIPPED application.yaml, as in the real app: it supplies editor.brand.name
+                // and editor.brand.directory, which is what makes a stray EDITOR_BRAND bind
+                // silently (review round 1 HIGH-1) unless the config refuses it
+                .withInitializer(new ConfigDataApplicationContextInitializer())
                 // the NAME must end in "systemEnvironment" for Spring to apply the relaxed
-                // (upper-case, underscore) mapping to the source
+                // (upper-case, underscore) mapping to the source; first, as the real environment
                 .withInitializer(ctx -> ctx.getEnvironment().getPropertySources()
                         .addFirst(new SystemEnvironmentPropertySource("test-systemEnvironment",
                                 aEnvironment)));
@@ -178,20 +201,22 @@ class BrandResourceConfigTest
     @Test
     void editorBrandAloneNeverSelectsABrand()
     {
-        // review H1: EDITOR_BRAND maps to editor.brand — the object — and the binder cannot turn
-        // "p300" into it: the context refuses to start (loud), it never serves p300 or neutral
+        // review H1 / round-1 HIGH-1: EDITOR_BRAND maps to editor.brand — the object. With the
+        // shipped application.yaml supplying name and directory, the binder swallows the string
+        // (bindObject catches the conversion failure and binds the nested object instead), so
+        // without a guard the real app silently served neutral. BrandResourceConfig refuses it.
         runner(Map.of("EDITOR_BRAND", "p300")).run(ctx ->
         {
             Throwable failure = ctx.getStartupFailure();
             assertNotNull(failure, "EDITOR_BRAND must not start the service as if nothing was set");
             Throwable cause = failure;
-            while (cause.getCause() != null && !cause.getMessage().contains("Could not bind"))
+            while (cause.getCause() != null && !(cause instanceof IllegalStateException
+                    && cause.getMessage().contains("EDITOR_BRAND_NAME")))
             {
                 cause = cause.getCause();
             }
-            assertTrue(
-                    cause.getMessage().contains("Could not bind properties to 'EditorProperties'"),
-                    cause.getMessage());
+            assertTrue(cause.getMessage().contains("EDITOR_BRAND_NAME"), cause.getMessage());
+            assertTrue(cause.getMessage().contains("\"p300\""), cause.getMessage());
         });
     }
 

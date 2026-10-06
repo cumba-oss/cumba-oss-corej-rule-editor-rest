@@ -112,8 +112,8 @@ editor:
   # directory at the bundle's config/brands (EDITOR_BRAND_DIRECTORY overrides it). An unknown
   # or invalid name FAILS START-UP naming the available brands; nothing is served silently.
   # ⚠ The environment variable is EDITOR_BRAND_NAME — EDITOR_BRAND maps to the `brand` object
-  # itself, which no string binds to: the service refuses to start. API-only builds (no bundled
-  # SPA) ignore both keys.
+  # itself and selects nothing (the binder would drop it silently), so the service refuses to
+  # start on it. API-only builds (no bundled SPA) ignore name and directory, not that refusal.
   brand:
     name: neutral
     directory:

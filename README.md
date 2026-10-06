@@ -279,8 +279,8 @@ own. No corpus directory is shipped: the rules come from git, per user.
    (build the SPA first: `npm ci && npm run build` there). The default build is **API-only**.
    The SPA's **brand** (its look: `brands/README.md` in the web repo) is served as `/brand/` by
    `BrandResourceConfig`: `EDITOR_BRAND_NAME=<name>` selects it (`neutral` by default, `p300`
-   ships; ⚠ `EDITOR_BRAND` is not the variable — it maps to the `editor.brand` object itself and
-   the service refuses to start), looked up under `editor.brand.directory` first (`config/brands/` of the bundle, or
+   ships; ⚠ `EDITOR_BRAND` is not the variable — it names the `editor.brand` object, selects
+   nothing, and the service refuses to start on it rather than silently serving `neutral`), looked up under `editor.brand.directory` first (`config/brands/` of the bundle, or
    `EDITOR_BRAND_DIRECTORY`; `/etc/rule-editor/brands/<name>` in the container) and then among
    the brands packaged with the SPA. An unknown or invalid name **fails start-up** naming the
    available ones. API-only builds serve no `/brand/`.

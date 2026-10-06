@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import net.cumba.corej.core.RuleLanguage;
 import net.cumba.corej.editor.HomeStaysCleanExtension;
 import net.cumba.corej.editor.corpus.CorpusLayout;
 import net.cumba.corej.editor.engine.CorpusText;
@@ -104,7 +105,10 @@ class EngineApiTest
     {
         MockHttpSession s = login(mvc, "mw", FakeForge.WRITE_TOKEN);
         mvc.perform(get("/api/info")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.engine.languageLevel").value(1))
+                // the engine's own level (RuleLanguage.LEVEL), not a literal: the level moves
+                // with the engine; the fixture branch's LANGUAGE-LEVEL below stays the "1"
+                // RemoteRepo writes
+                .andExpect(jsonPath("$.engine.languageLevel").value(RuleLanguage.LEVEL))
                 .andExpect(jsonPath("$.engine.storeAvailable").value(true))
                 .andExpect(jsonPath("$.engine.storeFormat").value(5))
                 .andExpect(jsonPath("$.engine.maxBufferBytes").value(MAX_BYTES))

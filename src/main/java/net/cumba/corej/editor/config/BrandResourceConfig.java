@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -32,7 +33,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p>
  * An API-only build (no {@code classpath:/static/index.html}) registers no mapping and validates
- * nothing: one INFO line.
+ * nothing but one thing: a value under {@code editor.brand} itself ({@code EDITOR_BRAND=x}) refuses
+ * start-up in every build. Relaxed binding maps {@code EDITOR_BRAND} to the {@code brand} OBJECT,
+ * and because {@code application.yaml} supplies {@code name} and {@code directory} the binder
+ * silently drops the string (measured, review round 1 HIGH-1) — the typo would serve
+ * {@code neutral} with no error.
  * </p>
  *
  * <p>
@@ -57,14 +62,17 @@ public final class BrandResourceConfig implements WebMvcConfigurer
     private final @Nullable String location;
 
     @Autowired
-    public BrandResourceConfig(EditorProperties aProperties, ResourceLoader aLoader)
+    public BrandResourceConfig(EditorProperties aProperties, ResourceLoader aLoader,
+            Environment aEnvironment)
     {
-        this(aProperties.getBrand(), aLoader);
+        this(aProperties.getBrand(), aLoader, aEnvironment);
     }
 
 
-    BrandResourceConfig(EditorProperties.Brand aBrand, ResourceLoader aLoader)
+    BrandResourceConfig(EditorProperties.Brand aBrand, ResourceLoader aLoader,
+            Environment aEnvironment)
     {
+        refuseBrandObjectValue(aEnvironment);
         location = resolve(aBrand, aLoader);
         if (location == null)
         {
@@ -73,6 +81,25 @@ public final class BrandResourceConfig implements WebMvcConfigurer
         else
         {
             LOG.info("brand '{}' served as /brand/ from {}", aBrand.getName(), location);
+        }
+    }
+
+
+    /**
+     * Refuses a value for the {@code editor.brand} OBJECT — {@code EDITOR_BRAND=x} or
+     * {@code -Deditor.brand=x} — which names no brand and which the binder would otherwise drop.
+     *
+     * @throws IllegalStateException
+     *             naming the variable that selects a brand
+     */
+    static void refuseBrandObjectValue(Environment aEnvironment)
+    {
+        String stray = aEnvironment.getProperty("editor.brand");
+        if (stray != null)
+        {
+            throw new IllegalStateException("editor.brand=\"" + stray
+                    + "\" (EDITOR_BRAND) names the brand object, not a brand, and selects nothing:"
+                    + " set EDITOR_BRAND_NAME (editor.brand.name) instead");
         }
     }
 
