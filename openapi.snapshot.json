@@ -680,6 +680,9 @@
       },
       "Finding" : {
         "properties" : {
+          "dataset" : {
+            "type" : "string"
+          },
           "groupKey" : {
             "additionalProperties" : {
               "type" : "string"

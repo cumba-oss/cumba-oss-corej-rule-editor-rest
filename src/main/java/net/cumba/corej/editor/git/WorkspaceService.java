@@ -125,14 +125,17 @@ public final class WorkspaceService
 
 
     /**
-     * The user's workspace, cloned with the session's credentials when it does not exist yet, and
-     * marked used.
+     * The user's workspace, cloned with the session's credentials when it does not exist yet.
+     * Nothing is written to an existing workspace here — the commit identity and the last-use
+     * marker are {@link Workspace#markUsedBy written under its lock} by the caller (review drift:
+     * this used to write {@code .git/config} and the marker before the lock, racing a push's config
+     * save).
      *
      * @throws EditorException
      *             502 when the clone cannot be created
      */
     @SuppressWarnings("PMD.CloseResource") // kept open in the map, closed by closeAll / delete
-    public Workspace workspace(long aUserId, String aDefaultBranch, String aName, String aEmail,
+    public Workspace workspace(long aUserId, String aDefaultBranch,
             @Nullable CredentialsProvider aCredentials)
     {
         Workspace ws = open.get(aUserId);
@@ -144,15 +147,6 @@ public final class WorkspaceService
                 ws = open.computeIfAbsent(aUserId,
                         id -> openOrCreate(id, aDefaultBranch, aCredentials));
             }
-        }
-        try
-        {
-            ws.setIdentity(aName, aEmail);
-            ws.touch();
-        }
-        catch (IOException e)
-        {
-            throw new UncheckedIOException(e);
         }
         return ws;
     }

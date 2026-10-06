@@ -94,11 +94,17 @@ public record RunReport(String outcome, String code, String detail, ScopeGate sc
      * One finding row. The maps keep the engine's order (REST review #3: {@code Map.copyOf}
      * scrambled keys, values and group key per JVM, twice — once in the worker, once in the
      * parent); a {@code null} key is dropped, a {@code null} value (a missing value) kept.
+     *
+     * @param dataset
+     *            the dataset the finding is on, as the engine's report names it: the scenario's
+     *            primary dataset ({@code #test domain=}) — a scenario run evaluates the rule on it,
+     *            the other blocks are what it may look up (web review #11: the Results tab's
+     *            dataset column); {@code null} when the scenario could not be read back
      */
-    public record Finding(@Nullable String ruleId, long row, @Nullable String usubjid,
-            @Nullable String seq, Map<String, String> keys, Map<String, String> values,
-            @Nullable String level, String unit, Map<String, String> groupKey,
-            List<String> namedColumns, @Nullable String message)
+    public record Finding(@Nullable String ruleId, @Nullable String dataset, long row,
+            @Nullable String usubjid, @Nullable String seq, Map<String, String> keys,
+            Map<String, String> values, @Nullable String level, String unit,
+            Map<String, String> groupKey, List<String> namedColumns, @Nullable String message)
     {
 
         public Finding

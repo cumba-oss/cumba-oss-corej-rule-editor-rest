@@ -322,6 +322,26 @@ public final class Workspace implements AutoCloseable
     }
 
 
+    /**
+     * Marks the workspace used by a session: the commit identity (§5.1.7) and the last-use marker
+     * (retention). Both write files — {@code .git/config} and the marker — so only the holder of
+     * the {@link #lock() lock} may do it; a push saving the config at the same time would otherwise
+     * race it.
+     *
+     * @throws IllegalStateException
+     *             when the calling thread does not hold the lock
+     */
+    public void markUsedBy(String aName, String aEmail) throws IOException
+    {
+        if (!lock.isHeldByCurrentThread())
+        {
+            throw new IllegalStateException("markUsedBy needs the workspace lock");
+        }
+        setIdentity(aName, aEmail);
+        touch();
+    }
+
+
     /** Sets the commit identity (§5.1.7) merges and commits use. */
     public void setIdentity(String aName, String aEmail) throws IOException
     {

@@ -6,6 +6,7 @@ import static net.cumba.corej.editor.web.ApiTestSupport.json;
 import static net.cumba.corej.editor.web.ApiTestSupport.login;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,10 +14,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import net.cumba.corej.editor.HomeStaysCleanExtension;
 import net.cumba.corej.editor.corpus.CorpusLayout;
+import net.cumba.corej.editor.engine.CorpusText;
 import net.cumba.corej.editor.engine.Json;
+import net.cumba.corej.editor.git.Workspace;
+import net.cumba.corej.editor.git.WorkspaceService;
 import net.cumba.corej.editor.testing.FakeForge;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import net.cumba.corej.editor.testing.TestStore;
@@ -77,6 +83,9 @@ class EngineApiTest
 
     @Autowired
     private EngineController engine;
+
+    @Autowired
+    private WorkspaceService workspaces;
 
     private static String code(MvcResult aResult) throws Exception
     {
@@ -385,5 +394,30 @@ class EngineApiTest
                 body(run).toString());
         mvc.perform(get("/api/status").session(s)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.uncommitted.length()").value(0));
+    }
+
+
+    @SuppressWarnings("PMD.CloseResource") // owned by the WorkspaceService
+    @Test
+    void aSchemaFileThatIsNotJsonIsItsOwnError() throws Exception
+    {
+        // REST review #9: "not JSON" reused NO_SCHEMA; it is SCHEMA_INVALID (422) now
+        MockHttpSession s = login(mvc, "mw", FakeForge.WRITE_TOKEN);
+        Workspace ws = workspaces.peek(FakeForge.WRITER.id());
+        assertNotNull(ws);
+        Path schema = ws.directory().resolve(CorpusText.SCHEMA_DOCUMENTATION);
+        byte[] original = Files.readAllBytes(schema);
+        Files.writeString(schema, "{ \"properties\": [ not json");
+        try
+        {
+            MvcResult broken = mvc.perform(get("/api/engine/schema").session(s))
+                    .andExpect(status().is(422)).andReturn();
+            assertEquals("SCHEMA_INVALID", code(broken));
+        }
+        finally
+        {
+            Files.write(schema, original);
+        }
+        mvc.perform(get("/api/engine/schema").session(s)).andExpect(status().isOk());
     }
 }

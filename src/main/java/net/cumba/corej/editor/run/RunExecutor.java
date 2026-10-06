@@ -186,7 +186,7 @@ public final class RunExecutor
                     r.getTotalViolationCount(), r.isTruncated(), r.getRuntimeMillis()));
             for (Violation v : r.getViolations())
             {
-                findings.add(toFinding(r, v));
+                findings.add(toFinding(aScenario == null ? null : aScenario.getDomain(), r, v));
             }
         }
         ScenarioRunner.EvalOutcome eval = aResult.evaluation();
@@ -218,9 +218,15 @@ public final class RunExecutor
     }
 
 
-    static RunReport.Finding toFinding(RuleExecutionResult aResult, Violation aViolation)
+    /**
+     * @param aDataset
+     *            the dataset the engine evaluated the rule on — the scenario's domain, which the v2
+     *            report ({@code ScenarioReports}) gives every finding too
+     */
+    static RunReport.Finding toFinding(@Nullable String aDataset, RuleExecutionResult aResult,
+            Violation aViolation)
     {
-        return new RunReport.Finding(aResult.getRuleId(), aViolation.getRowNumber(),
+        return new RunReport.Finding(aResult.getRuleId(), aDataset, aViolation.getRowNumber(),
                 aViolation.getUsubjid(), aViolation.getSeq(),
                 aViolation.getKeys() == null ? Map.of() : aViolation.getKeys(),
                 aViolation.getValues() == null ? Map.of() : aViolation.getValues(),

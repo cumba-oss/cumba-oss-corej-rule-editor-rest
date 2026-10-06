@@ -5,11 +5,16 @@ import static net.cumba.corej.editor.web.ApiTestSupport.csrf;
 import static net.cumba.corej.editor.web.ApiTestSupport.json;
 import static net.cumba.corej.editor.web.ApiTestSupport.login;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import net.cumba.corej.editor.HomeStaysCleanExtension;
@@ -140,6 +145,19 @@ class RunLockApiTest
         MockHttpSession s = login(mvc, "mw", FakeForge.WRITE_TOKEN);
         Workspace ws = workspaces.peek(FakeForge.WRITER.id());
         assertNotNull(ws);
+        // review drift: the identity and the last-use marker were written BEFORE the lock
+        Path config = ws.directory().resolve(".git/config");
+        Path marker = ws.directory().resolve(".git/cumba-editor-last-used");
+        ws.lock().lock();
+        try
+        {
+            ws.setIdentity("stale", "stale@example.test");
+            Files.setLastModifiedTime(marker, FileTime.from(Instant.EPOCH));
+        }
+        finally
+        {
+            ws.lock().unlock();
+        }
         CountDownLatch held = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         Thread holder = new Thread(() ->
@@ -166,6 +184,10 @@ class RunLockApiTest
             MvcResult busy = mvc.perform(get("/api/status").session(s)).andReturn();
             assertEquals(503, busy.getResponse().getStatus());
             assertEquals(Access.WORKSPACE_BUSY, body(busy).path("code").asString());
+            assertTrue(Files.readString(config).contains("stale"),
+                    "a request that never got the lock wrote no identity");
+            assertEquals(FileTime.from(Instant.EPOCH), Files.getLastModifiedTime(marker),
+                    "... and no last-use marker");
         }
         finally
         {
@@ -175,5 +197,8 @@ class RunLockApiTest
         assertEquals(200,
                 mvc.perform(get("/api/status").session(s)).andReturn().getResponse().getStatus(),
                 "served again once the lock is free");
+        assertTrue(Files.readString(config).contains(FakeForge.WRITER.name()),
+                "the identity is written by the request that holds the lock");
+        assertNotEquals(FileTime.from(Instant.EPOCH), Files.getLastModifiedTime(marker));
     }
 }

@@ -41,8 +41,8 @@ class RunReportTest
             kv.add(name.toLowerCase(java.util.Locale.ROOT));
         }
         Map<String, String> m = ordered(kv.toArray(String[]::new));
-        RunReport.Finding f = new RunReport.Finding("R", 1, "01-001", "1", m, m, "ERROR", "ROW", m,
-                List.of("AETERM"), "msg");
+        RunReport.Finding f = new RunReport.Finding("R", "AE", 1, "01-001", "1", m, m, "ERROR",
+                "ROW", m, List.of("AETERM"), "msg");
         assertEquals(List.copyOf(m.keySet()), List.copyOf(f.keys().keySet()));
         RunReport.Finding back = Json.read(Json.write(f), RunReport.Finding.class);
         assertEquals(List.copyOf(m.keySet()), List.copyOf(back.keys().keySet()));
@@ -58,12 +58,12 @@ class RunReportTest
         m.put("AETERM", null);
         m.put(null, "x");
         m.put("AESEQ", "1");
-        RunReport.Finding f = new RunReport.Finding(null, 1, null, null, m, m, null, "ROW", m,
+        RunReport.Finding f = new RunReport.Finding(null, null, 1, null, null, m, m, null, "ROW", m,
                 new ArrayList<>(java.util.Arrays.asList("A", null)), null);
         assertEquals(List.of("AETERM", "AESEQ"), List.copyOf(f.keys().keySet()));
         assertNull(f.values().get("AETERM"));
         assertEquals(List.of("A"), f.namedColumns());
-        RunReport.Finding nulls = new RunReport.Finding(null, 1, null, null, null, null, null,
+        RunReport.Finding nulls = new RunReport.Finding(null, null, 1, null, null, null, null, null,
                 "ROW", null, null, null);
         assertEquals(Map.of(), nulls.keys());
         assertEquals(List.of(), nulls.namedColumns());

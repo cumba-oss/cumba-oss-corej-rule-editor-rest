@@ -97,9 +97,9 @@ public class LoginService
                 write ? AccessMode.EDIT : AccessMode.READ_ONLY, defaultBranch);
 
         SessionCredentials credentials = new SessionCredentials(aCredentials);
-        // the clone first: a failed clone leaves no half-established session behind
-        workspaces.workspace(principal.id(), defaultBranch, principal.name(), principal.email(),
-                credentials.git());
+        // the clone first: a failed clone leaves no half-established session behind; the
+        // identity and the last use are marked by the session's first request, under the lock
+        workspaces.workspace(principal.id(), defaultBranch, credentials.git());
 
         HttpSession existing = aRequest.getSession(false);
         if (existing != null)

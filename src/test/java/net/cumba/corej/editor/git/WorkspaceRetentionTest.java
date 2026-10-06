@@ -1,7 +1,10 @@
 package net.cumba.corej.editor.git;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,9 +12,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.junit.jupiter.api.AfterEach;
@@ -49,7 +54,7 @@ class WorkspaceRetentionTest
 
     private Workspace open(long aUser)
     {
-        return service.workspace(aUser, "main", "U" + aUser, "u" + aUser + "@x.test", null);
+        return service.workspace(aUser, "main", null);
     }
 
 
@@ -126,7 +131,7 @@ class WorkspaceRetentionTest
         WorkspaceService restarted = new WorkspaceService(tmp.resolve("workspaces"), remote.url());
         try
         {
-            Workspace again = restarted.workspace(8, "main", "U8", "u8@x.test", null);
+            Workspace again = restarted.workspace(8, "main", null);
             assertEquals("f", again.currentBranch(), "the next session resumes the branch");
             assertEquals(List.of(8L), restarted.userIdsOnDisk());
         }
@@ -143,8 +148,8 @@ class WorkspaceRetentionTest
         // security review L10: the check and the deletion happen in ONE lock hold; a workspace
         // whose lock a request holds is in use
         Workspace ws = open(8);
-        java.util.concurrent.CountDownLatch locked = new java.util.concurrent.CountDownLatch(1);
-        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         Thread request = new Thread(() ->
         {
             ws.lock().lock();
@@ -173,5 +178,64 @@ class WorkspaceRetentionTest
         assertEquals(List.of(8L), retention.sweep(late).deleted());
         assertTrue(ws.isRetired(), "a request still holding the old object finds it retired");
         assertFalse(Files.exists(service.directoryFor(8)));
+    }
+
+
+    @Test
+    void handingOutAWorkspaceWritesNothingOutsideItsLock() throws Exception
+    {
+        // review drift: workspace() wrote .git/config (the identity) and the last-use marker
+        // BEFORE the caller took the lock, racing a push's config save under it
+        Workspace ws = open(8);
+        Path config = ws.directory().resolve(".git/config");
+        Path marker = ws.directory().resolve(".git").resolve(Workspace.LAST_USED_MARKER);
+        Files.setLastModifiedTime(marker, FileTime.from(Instant.EPOCH));
+        byte[] configBefore = Files.readAllBytes(config);
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread push = new Thread(() ->
+        {
+            ws.lock().lock();
+            try
+            {
+                held.countDown();
+                release.await();
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            finally
+            {
+                ws.lock().unlock();
+            }
+        });
+        push.start();
+        held.await();
+        try
+        {
+            assertSame(ws, open(8), "the same workspace, handed out while another holds it");
+            assertArrayEquals(configBefore, Files.readAllBytes(config), "config untouched");
+            assertEquals(FileTime.from(Instant.EPOCH), Files.getLastModifiedTime(marker),
+                    "marker untouched");
+            assertThrows(IllegalStateException.class, () -> ws.markUsedBy("U8", "u8@x.test"),
+                    "marking needs the lock");
+        }
+        finally
+        {
+            release.countDown();
+            push.join(10_000);
+        }
+        ws.lock().lock();
+        try
+        {
+            ws.markUsedBy("U8", "u8@x.test");
+        }
+        finally
+        {
+            ws.lock().unlock();
+        }
+        assertTrue(Files.readString(config).contains("U8"), "the identity, under the lock");
+        assertNotEquals(FileTime.from(Instant.EPOCH), Files.getLastModifiedTime(marker));
     }
 }

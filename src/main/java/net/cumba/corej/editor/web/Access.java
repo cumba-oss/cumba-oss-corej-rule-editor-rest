@@ -178,8 +178,8 @@ public class Access
         // retired: take the service's current one instead (one retry; a second is a real fault).
         for (int attempt = 0;; attempt++)
         {
-            Workspace ws = workspaces.workspace(aUser.id(), aUser.defaultBranch(), aUser.name(),
-                    aUser.email(), credentials.git());
+            Workspace ws = workspaces.workspace(aUser.id(), aUser.defaultBranch(),
+                    credentials.git());
             lock(ws);
             try
             {
@@ -191,6 +191,8 @@ public class Access
                     }
                     throw busy();
                 }
+                // identity and last use are written under the lock, never before it
+                ws.markUsedBy(aUser.name(), aUser.email());
                 return aOp.apply(ws, credentials);
             }
             finally

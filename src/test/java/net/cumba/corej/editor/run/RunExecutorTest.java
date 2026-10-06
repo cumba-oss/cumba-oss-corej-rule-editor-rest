@@ -71,6 +71,7 @@ class RunExecutorTest
         assertTrue(r.verdict().pass(), r.verdict().detail());
         assertEquals(1, r.findings().size());
         RunReport.Finding f = r.findings().get(0);
+        assertEquals("AE", f.dataset());
         assertEquals(1, f.row());
         assertEquals("01-001", f.usubjid());
         assertEquals("HEADACHE", f.values().get("AEDECOD"));
@@ -153,6 +154,26 @@ class RunExecutorTest
         assertEquals(RuleTestScenario.Verdict.NO_VIOLATION, parsed.getExpect());
         assertNull(parsed.getExpectViolationCount());
         assertEquals(List.of(), parsed.getExpectedViolations());
+    }
+
+
+    @Test
+    void aFindingNamesTheDatasetTheEngineEvaluatedInAMultiDatasetScenario(@TempDir Path aRoot)
+        throws IOException
+    {
+        // web review #11: the Results tab's dataset column. DM comes FIRST in the file; the rule
+        // runs on the primary dataset (#test domain=AE), as the v2 report names it.
+        String cdt = RemoteRepo.SCENARIO_B_INVALID_TEXT.replace("dataset AE label=",
+                "dataset DM label=\"Demographics\"\ncol STUDYID type=Char\ncol USUBJID type=Char\n"
+                        + "---\nSTUDY1 | 01-001\n---\ndataset AE label=");
+        RunReport r = RunExecutor.execute(job(aRoot, RemoteRepo.CHECK_B_TEXT, cdt, null));
+        assertEquals("PASS", r.outcome(), r.detail());
+        assertEquals(1, r.findings().size());
+        assertEquals("AE", r.findings().get(0).dataset());
+        JsonNode report = Json.parse(r.reportJson());
+        assertTrue(report.toString().contains("\"AE\""), "the JSON tab names the same dataset");
+        assertEquals(r.findings(), Json.read(Json.write(r), RunReport.class).findings(),
+                "the field crosses the worker's JSON");
     }
 
 
