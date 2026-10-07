@@ -231,10 +231,34 @@ public final class RunExecutor
                 aViolation.getKeys() == null ? Map.of() : aViolation.getKeys(),
                 aViolation.getValues() == null ? Map.of() : aViolation.getValues(),
                 aViolation.getLevel() == null ? null : aViolation.getLevel().name(),
-                String.valueOf(aViolation.getUnit()),
+                unitLabel(aViolation.getUnit()),
                 aViolation.getGroupKey() == null ? Map.of() : aViolation.getGroupKey(),
                 aViolation.getNamedColumns() == null ? List.of() : aViolation.getNamedColumns(),
                 aResult.getMessage());
+    }
+
+
+    /**
+     * The finding's unit as a stable label — never the record's {@code toString}, which carries the
+     * unit's fields ({@code Dataset[folded=true]} since the engine's folded dataset unit,
+     * {@code Row[row=3, merged=null]}) and would change the report whenever a unit grows a field
+     * (PLAN-message-folded-corpus-alignment review LOW-6).
+     *
+     * @param aUnit
+     *            the engine's unit stamp, {@code null} on the single-level path
+     * @return {@code "dataset"}, {@code "record"}, {@code "column"}, {@code "group"} or {@code ""}
+     *         for no stamp
+     */
+    static String unitLabel(Violation.@Nullable Unit aUnit)
+    {
+        return switch (aUnit)
+        {
+        case null -> "";
+        case Violation.Unit.Dataset _ -> "dataset";
+        case Violation.Unit.Row _ -> "record";
+        case Violation.Unit.Column _ -> "column";
+        case Violation.Unit.Group _ -> "group";
+        };
     }
 
 
