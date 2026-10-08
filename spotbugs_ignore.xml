@@ -17,6 +17,13 @@
     </Match>
 
     <Match>
+        <!-- EI_EXPOSE_REP: the same for the one nested config object that
+             holds another (editor.store.seed.* — Store.getSeed()). -->
+        <Class name="net.cumba.corej.editor.config.EditorProperties$Store" />
+        <Bug pattern="EI_EXPOSE_REP" />
+    </Match>
+
+    <Match>
         <!-- EI_EXPOSE_REP2: constructors store Spring-injected singleton
              collaborators (the forge client, the workspace service, the
              security context repository, the anonymous clone). Holding the

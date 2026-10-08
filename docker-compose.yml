@@ -6,15 +6,34 @@
 #   rule-editor-rest  the API, with the per-user git workspaces and the metadata store
 #                     on volumes.
 #
-# Build contexts are the two sibling checkouts of the meta repository
-# (databrowser-meta/cumba-corej-rule-editor-{rest,web}). Before `docker compose up --build`:
+# Build contexts are the two sibling checkouts cumba-oss-corej-rule-editor-{rest,web} (the web
+# repo's DOCKER.md, step 1). Both Dockerfiles build FROM THE SOURCES (multi-stage: Maven, resp.
+# Node, inside the build), so after a `git pull`
 #
-#     (cd ../cumba-oss-corej-rule-editor-web && npm ci && npm run build)      # dist/ for the nginx image
-#     mvn -B clean package                                                # the exploded bundle for the rest image
+#     docker compose up --build
+#
+# is the whole build — nothing to run beforehand, no stale target/ or dist/ to package.
+# The rest build resolves its dependencies from Maven Central with no settings at all, which is
+# enough for a RELEASE of this repository. `main` between releases pins the cumba-oss-*
+# DEVELOPMENT snapshots, which Central does not host (the Dockerfile's header): give the build a
+# Maven settings.xml naming a repository that serves them, as the OPTIONAL build secret
+# `maven_settings` — mounted for the Maven step only, never stored in an image layer — with a
+# docker-compose.override.yml beside this file (compose merges it in by itself):
+#
+#     services:
+#       rule-editor-rest:
+#         build:
+#           secrets:
+#             - maven_settings
+#     secrets:
+#       maven_settings:
+#         file: ${HOME}/.m2/settings.xml
+#
+# Never copy the settings file into the build context.
 #
 # Then point the service at your repository and forge — EDIT the environment below or
 # mount a config directory at /etc/rule-editor (config/README.md) — and open
-# http://localhost:8080/. The repository is never bundled: every user's workspace is a
+# http://127.0.0.1:8080/. The repository is never bundled: every user's workspace is a
 # clone fetched with THEIR token (§5.1.5–5.1.6).
 #
 # ⚠ HTTPS (security review M3). The SPA's nginx speaks plain HTTP and is published on the
@@ -26,39 +45,57 @@
 # to reach it from elsewhere, edit the port binding) — never for real tokens.
 #
 # ⚠ THE METADATA STORE. Everything that needs CDISC Library content — the analysis,
-# completion, tooltips, the scenario runs — reads OUR metadata store, never the
-# Library's pickle or web API (databrowser-meta CLAUDE.md). The store is NOT shipped:
-# seed it once, at the engine's store format (5), with the coreJ CLI or data browser
-# flow that invokes the seeders (PickleStoreSeeder / WebApiStoreSeeder), and put the
-# resulting FILE into the `metadata-store` volume as metadata-store.zip (the path
-# CDISC_METADATA_STORE names below — a file, not the directory). An older format is
-# refused at startup (re-seed once) and the service then runs without a store: the
-# analysis still works, scope completion is empty, a scenario needing the Library fails
-# with that reason; a newer format is never replaced automatically.
+# completion, tooltips, the scenario runs — reads OUR metadata store (the FILE
+# CDISC_METADATA_STORE names below, in the `metadata-store` volume), never the Library's
+# pickle or web API (databrowser-meta CLAUDE.md). The service SEEDS IT ITSELF at start-up
+# (owner, 2026-10-08), in the background, when the volume holds none:
+#   EDITOR_STORE_SEED_TYPE     GITHUB_PKL (default): the pickles of the cdisc-rules-engine
+#                              tag below from GitHub (resources/cache), no key needed — one
+#                              ~80 MB download, a few minutes on the first start;
+#                              API: the CDISC Library API with EDITOR_STORE_SEED_API_KEY;
+#                              NONE: never seed — put a store into the volume by hand.
+#   EDITOR_STORE_SEED_PKL_TAG  the cdisc-rules-engine tag (default v0.17.1).
+#   EDITOR_STORE_SEED_API_KEY  API only; never logged, never served.
+# The service answers at once: until the seed is done the editor shows "No metadata store
+# on this instance (metadata store is being seeded (GITHUB_PKL v0.17.1)…)", then the store
+# opens without a restart (a failure shows its reason; the service runs on without a
+# store). The store is written beside the final file and moved over it atomically, with
+# a seed record metadata-store.zip.seed.json (type, tag, seededAt, complete): change the
+# type or the tag and the next start re-seeds; a seed whose downloads partly failed is
+# used (when there was no store) but recorded incomplete and re-seeded at the next start;
+# to force a re-seed, delete metadata-store.zip from the volume and restart. A store of
+# an OLDER format is re-seeded, seed record or not; a NEWER one (written by a newer
+# build) is never replaced; a store of the current format without a seed record (put
+# there by hand) is left alone, and so is a store path that is a directory. /api/info
+# reports the seed as engine.seeding (true while it runs) and engine.seedStatus (its
+# state, also while an old store serves). One seed per volume at a time: a second
+# container finds metadata-store.zip.seed.lock held and does not seed.
 #
 # ⚠ MEMORY. JAVA_OPTS sizes the API JVM only. Every run is a CHILD JVM with its own
 # heap (EDITOR_RUN_MAX_HEAP, default 1g), up to EDITOR_RUN_MAX_CONCURRENT at once,
 # killed past EDITOR_RUN_TIMEOUT: give the container JAVA_OPTS heap + max-concurrent ×
 # max-heap, or lower the two run settings.
 #
-# ⚠ Written in a sandbox WITHOUT docker: the file is validated for shape only. The
-# first `docker compose up` is the real test (then run src/test/smoke.sh's steps
-# against http://localhost:8080).
+# Run for real on rootless Podman (podman-compose, WSL2) since 2026-10-08. ⚠ On a WSL2 kernel
+# netavark cannot program nftables for the network below ("nft" did not return successfully):
+# switch it to iptables (the web repo's DOCKER.md, step 5b) or run the pod recipe there.
 
 services:
   rule-editor-rest:
     build:
       context: .
-      args:
-        VERSION: ${VERSION:-0.1.0-SNAPSHOT}
     environment:
       # One instance serves ONE repository on ONE forge (§5.1.1, O9).
       EDITOR_REPOSITORY_URL: ${EDITOR_REPOSITORY_URL:-https://github.com/cumba-oss/cumba-oss-corej-rules.git}
       EDITOR_FORGE_TYPE: ${EDITOR_FORGE_TYPE:-github}
       EDITOR_FORGE_API_URL: ${EDITOR_FORGE_API_URL:-https://api.github.com}
       EDITOR_WORKSPACE_ROOT: /var/lib/rule-editor/workspaces
-      # The engine reads the store FILE from here (see the note above).
+      # The engine reads the store FILE from here; the service seeds it at start-up when
+      # the volume holds none (see the note above).
       CDISC_METADATA_STORE: /var/lib/rule-editor/metadata-store/metadata-store.zip
+      EDITOR_STORE_SEED_TYPE: ${EDITOR_STORE_SEED_TYPE:-GITHUB_PKL}
+      EDITOR_STORE_SEED_PKL_TAG: ${EDITOR_STORE_SEED_PKL_TAG:-v0.17.1}
+      EDITOR_STORE_SEED_API_KEY: ${EDITOR_STORE_SEED_API_KEY:-}
       # The API JVM; the run workers are separate JVMs sized by the three settings below.
       JAVA_OPTS: ${JAVA_OPTS:--Xmx1g}
       EDITOR_RUN_MAX_HEAP: ${EDITOR_RUN_MAX_HEAP:-1g}

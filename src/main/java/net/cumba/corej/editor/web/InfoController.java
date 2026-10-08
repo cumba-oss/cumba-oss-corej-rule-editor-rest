@@ -58,12 +58,14 @@ public class InfoController
     public Dtos.ServiceInfo info()
     {
         BuildInfo b = BuildInfo.current();
+        // one read: the store may open mid-run (StoreSeeding)
+        EngineStore.Status st = store.status();
         return new Dtos.ServiceInfo(SERVICE, b.version(), b.commit(),
                 new Dtos.RepositoryInfo(
                         repository.url(), repository.owner(), repository.name(), forge),
                 anonymous.available(),
                 new Dtos.EngineInfo(runs.engineVersionOrNull(), EngineStore.languageLevel(),
-                        store.available(), store.formatVersion(), store.unavailableReason(),
-                        runTimeoutSeconds, maxBufferBytes));
+                        st.available(), st.formatVersion(), st.reason(), runTimeoutSeconds,
+                        maxBufferBytes, st.seeding(), st.seedStatus()));
     }
 }

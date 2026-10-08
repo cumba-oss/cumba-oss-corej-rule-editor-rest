@@ -54,10 +54,20 @@ public final class TestStore
 
     public static void write(Path aFile) throws IOException
     {
+        write(aFile, "TestStore");
+    }
+
+
+    /**
+     * The same store with {@code aRef} as its provenance reference — tells two seeds apart
+     * ({@code manifest().provenance().get(0).ref()}).
+     */
+    public static void write(Path aFile, String aRef) throws IOException
+    {
         new MetadataStoreWriter().addProduct(ig()).addProduct(model()).addCtPackage(ct())
                 .publishedCtPackages(List.of(CT_PACKAGE))
                 .productCatalogue(List.of(IG_KEY, MODEL_KEY))
-                .addProvenance(new StoreProvenance("fixture", "TestStore", "2026-10-06T00:00:00Z"))
+                .addProvenance(new StoreProvenance("fixture", aRef, "2026-10-06T00:00:00Z"))
                 .write(aFile);
     }
 

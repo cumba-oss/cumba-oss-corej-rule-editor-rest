@@ -100,11 +100,41 @@ editor:
   trusted-proxies: []
   # ---- the engine (phase 3) -------------------------------------------------------------
   # The metadata store file every analysis, completion, tooltip and run reads (databrowser-meta
-  # CLAUDE.md: CDISC Library content comes ONLY from our store; the editor never seeds). Blank =
-  # the engine's own resolution: CDISC_METADATA_STORE, then -Dcdisc.metadata.store. A store of
-  # another format is refused by the engine and the instance runs without one (analysis still
-  # works, scope completion is empty, a scenario needing the store fails with the reason).
+  # CLAUDE.md: CDISC Library content comes ONLY from our store; only the seeding below reads the
+  # pickle or the web API, to write it). Blank = the engine's own resolution:
+  # CDISC_METADATA_STORE, then -Dcdisc.metadata.store (the path counts whether or not the file
+  # exists yet: the seeding creates it). A store of another format is refused by the engine and
+  # the instance runs without one (analysis still works, scope completion is empty, a scenario
+  # needing the store fails with the reason) until the seeding below replaces an OLDER one.
   metadata-store:
+  store:
+    # ---- seeding the metadata store at START-UP (owner, 2026-10-08) ----------------------
+    # At start the service seeds the store file above IN THE BACKGROUND when it is absent, or
+    # refused for an OLDER format (seed record or not), or when this instance seeded it (the
+    # seed record <store>.seed.json beside it: type, tag, seededAt, source, complete) from
+    # another type or tag than configured here, or incompletely (a download failed: used when
+    # there was no store, re-seeded at the next start), or never recorded it. A store written by
+    # a NEWER build is never replaced; a store of the current format without a seed record
+    # (mounted by hand) and an unreadable one (a directory included) are left alone. A seed
+    # holds <store>.seed.lock: another process seeding the same file is not joined. The engine
+    # info reports the seed as `seeding` and `seedStatus`, also while an old store serves.
+    # The service serves at once: until the seed is done the engine info reports no store,
+    # with the reason "metadata store is being seeded (GITHUB_PKL v0.17.1)…" (a failure: its reason; the
+    # service keeps running without a store); then the store opens without a restart. The file
+    # is written beside the store and moved over it atomically — never half-written.
+    # To force a re-seed: delete the store file (or change type / pkl-tag) and restart.
+    seed:
+      # GITHUB_PKL (default): the Python engine's pickles of a github.com/cdisc-org/
+      #   cdisc-rules-engine tag (resources/cache), no key needed — downloads ~80 MB once;
+      # API: the CDISC Library API with api-key below (~860 requests on a first seed);
+      # NONE: never seed (the store is mounted by hand, as before).
+      # EDITOR_STORE_SEED_TYPE.
+      type: GITHUB_PKL
+      # The cdisc-rules-engine tag GITHUB_PKL reads. EDITOR_STORE_SEED_PKL_TAG.
+      pkl-tag: v0.17.1
+      # The CDISC Library API key, for API only. ⛔ A secret: never logged, never served (not in
+      # /api/info, not in a reason or an error). EDITOR_STORE_SEED_API_KEY.
+      api-key:
   # ---- the brand of the bundled SPA (-Pbundle-web; PLAN-web-branding-and-theme) -------------
   # A brand is a named folder (brand.css with the design tokens for light and dark, an optional
   # brand.json for a logo) served as /brand/. `neutral` (the default look) and `p300` ship with

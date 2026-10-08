@@ -540,6 +540,14 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "seedStatus" : {
+            "description" : "the last or ongoing seed's state, whether or not a store is open (e.g. 'seeding (API)…', 'seed failed (API): …', 'incomplete (API): …'); empty when there is nothing to say",
+            "type" : "string"
+          },
+          "seeding" : {
+            "description" : "true exactly while a seed of the store runs (first seed or re-seed)",
+            "type" : "boolean"
+          },
           "storeAvailable" : {
             "type" : "boolean"
           },

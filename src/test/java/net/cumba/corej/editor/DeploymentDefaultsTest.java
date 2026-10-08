@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.cumba.corej.editor.config.EditorProperties;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
@@ -57,6 +58,23 @@ class DeploymentDefaultsTest
         // PLAN-web-branding-and-theme: the SPA's brand is selectable, neutral by default (R5)
         assertTrue(compose.contains("BRAND: ${BRAND:-neutral}"),
                 "rule-editor-web takes BRAND, defaulting to neutral");
+    }
+
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theComposeFilePassesTheStoreSeedSettingsThrough() throws IOException
+    {
+        // owner 2026-10-08: the container seeds its store at start-up; the defaults match
+        // application.yaml's, the key defaults to empty (never a value in the file)
+        Map<String, Object> compose = new Yaml().load(read("docker-compose.yml"));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> rest = (Map<String, Object>) services.get("rule-editor-rest");
+        Map<String, Object> env = (Map<String, Object>) rest.get("environment");
+        assertEquals("${EDITOR_STORE_SEED_TYPE:-GITHUB_PKL}", env.get("EDITOR_STORE_SEED_TYPE"));
+        assertEquals("${EDITOR_STORE_SEED_PKL_TAG:-v0.17.1}", env.get("EDITOR_STORE_SEED_PKL_TAG"));
+        assertEquals("${EDITOR_STORE_SEED_API_KEY:-}", env.get("EDITOR_STORE_SEED_API_KEY"));
+        assertEquals("v0.17.1", EditorProperties.Seed.DEFAULT_PKL_TAG);
     }
 
 

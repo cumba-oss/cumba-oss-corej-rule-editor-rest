@@ -5,9 +5,14 @@
 #   loopback: the production defaults refuse both (security review L3), so the tests allow them.
 # * Every MockMvc request comes from 127.0.0.1 and the contexts log in dozens of times a minute:
 #   the per-client login limit (security review L9) is off here; LimitsApiTest turns it on.
+# * No context seeds a metadata store (no test reaches the network): StoreSeedingApiTest turns
+#   it on with a fake source.
 editor:
   repository:
     allow-http: true
     allow-file: true
   limits:
     logins-per-minute: 0
+  store:
+    seed:
+      type: NONE

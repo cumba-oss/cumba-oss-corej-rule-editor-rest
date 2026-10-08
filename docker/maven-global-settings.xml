@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Maven GLOBAL settings for the image build (Dockerfile, build stage: mvn -gs …).
+
+    The build starts from an EMPTY local repository, and Maven's built-in `central` has snapshots
+    DISABLED, which a `*` mirror inherits. Between releases this repository pins the cumba-oss-*
+    DEVELOPMENT snapshots, which Maven Central does not host: a build of `main` gets them from a
+    repository named in the OPTIONAL build secret `maven_settings`, typically through a `*` mirror
+    — and without this file not one snapshot resolves through that mirror ("Could not find
+    artifact net.cumba:cumba-oss-bootstrap:jar:<version>-SNAPSHOT"), although the repository has
+    them. A host build hides this because its ~/.m2 already holds the jars.
+
+    This file only ENABLES snapshots on `central` (and its plugin repository). Where `central`
+    points and with which credentials stays in the user settings passed as that secret. Without
+    the secret `central` is Maven Central, which serves no snapshot: a release, which pins none,
+    builds as before. No URL other than Central's own, and no credential, here.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+    <profiles>
+        <profile>
+            <id>image-build-snapshots</id>
+            <repositories>
+                <repository>
+                    <id>central</id>
+                    <url>https://repo.maven.apache.org/maven2</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </repository>
+            </repositories>
+            <pluginRepositories>
+                <pluginRepository>
+                    <id>central</id>
+                    <url>https://repo.maven.apache.org/maven2</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </pluginRepository>
+            </pluginRepositories>
+        </profile>
+    </profiles>
+    <activeProfiles>
+        <activeProfile>image-build-snapshots</activeProfile>
+    </activeProfiles>
+</settings>

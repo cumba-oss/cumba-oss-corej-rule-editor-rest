@@ -85,7 +85,11 @@ public final class Dtos
     public record EngineInfo(@Nullable String version, int languageLevel, boolean storeAvailable,
             @Schema(description = "the open store's format version, -1 without a store") int storeFormat,
             @Schema(description = "why there is no store; empty when there is one") String storeReason,
-            long runTimeoutSeconds, int maxBufferBytes)
+            long runTimeoutSeconds, int maxBufferBytes,
+            @Schema(description = "true exactly while a seed of the store runs (first seed or re-seed)") boolean seeding,
+            @Schema(description = "the last or ongoing seed's state, whether or not a store is open"
+                    + " (e.g. 'seeding (API)…', 'seed failed (API): …', 'incomplete (API): …');"
+                    + " empty when there is nothing to say") String seedStatus)
     {
     }
 

@@ -2,6 +2,7 @@ package net.cumba.corej.editor.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.cumba.corej.authoring.AuthoredRuleAssembler;
 import net.cumba.corej.editor.testing.MapSource;
 import net.cumba.corej.editor.testing.RemoteRepo;
 import net.cumba.corej.editor.testing.TestStore;
@@ -208,6 +210,81 @@ class RuleAnalyserTest
         assertNotNull(broken.derived());
         assertEquals("NONE", broken.derived().sensitivityConfidence());
         assertEquals(List.of(), broken.derived().outputVariables().effective());
+        // ... yet its universe is still the Scope's (owner 2026-10-08)
+        assertEquals(a.scope(), broken.scope());
+    }
+
+
+    /** CHECK_B with its expression replaced: what the author has typed so far. */
+    private static String withExpression(String aText, String aExpression)
+    {
+        String text = aText.replace("AEDECOD != \"\" and AETERM == \"\"", aExpression);
+        assertNotEquals(aText, text, "the fixture's expression was replaced");
+        return text;
+    }
+
+
+    @Test
+    void anUnparsableCheckKeepsTheScopeUniverseOfItsScope() throws IOException
+    {
+        // owner 2026-10-08: typing `empty(` made every variable vanish from completion
+        Analysis valid = analyser.analyse(corpus(), RemoteRepo.CHECK_B, RemoteRepo.CHECK_B_TEXT,
+                null);
+        Analysis typing = analyser.analyse(corpus(), RemoteRepo.CHECK_B,
+                withExpression(RemoteRepo.CHECK_B_TEXT, "empty("), null);
+        assertTrue(valid.loaded());
+        assertFalse(typing.loaded());
+        // the diagnostics still describe the real buffer: the expression error, ranged
+        assertTrue(
+                typing.diagnostics().stream()
+                        .anyMatch(d -> AuthoredRuleAssembler.EXPRESSION_SYNTAX.equals(d.code())
+                                && "ERROR".equals(d.severity()) && d.range() != null),
+                typing.diagnostics().toString());
+        assertNull(typing.derived(), "nothing is derived from a check that does not load");
+        assertEquals(List.of(), typing.referencedVariables());
+        // ... but the universe is the Scope's, identical to the loaded rule's
+        assertFalse(valid.scope().variables().isEmpty());
+        assertEquals(valid.scope(), typing.scope());
+        assertTrue(typing.storeAvailable());
+    }
+
+
+    @Test
+    void theScopeOnlyUniverseIsJudgedByTheAuthoredScope() throws IOException
+    {
+        // sensitivity control: the scope-only reading honours the Scope (not "no Scope = all")
+        String ts = RemoteRepo.CHECK_B_TEXT.replace("    - \"AE\"\n", "    - \"TS\"\n");
+        assertNotEquals(RemoteRepo.CHECK_B_TEXT, ts);
+        Analysis valid = analyser.analyse(corpus(), RemoteRepo.CHECK_B, ts, null);
+        Analysis typing = analyser.analyse(corpus(), RemoteRepo.CHECK_B,
+                withExpression(ts, "not empty(TSVAL) and"), null);
+        assertTrue(valid.loaded());
+        assertFalse(typing.loaded());
+        assertEquals(valid.scope(), typing.scope());
+        Set<String> inScope = typing.scope().datasets().stream()
+                .filter(Analysis.ScopeDataset::inScope).map(Analysis.ScopeDataset::name)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(Set.of("TS"), inScope);
+        Set<String> names = typing.scope().variables().stream().map(Analysis.Variable::name)
+                .collect(java.util.stream.Collectors.toSet());
+        assertTrue(names.contains("TSVAL") && !names.contains("AETERM"), names.toString());
+    }
+
+
+    @Test
+    void anInvalidScopeLeavesTheUniverseEmptyWithoutAnException() throws IOException
+    {
+        String badScope = withExpression(RemoteRepo.CHECK_B_TEXT, "empty(")
+                .replace("  Domains:\n    Include:\n    - \"AE\"\n", "  Domains: [\"AE\"]\n");
+        assertFalse(badScope.contains("Include"), badScope);
+        Analysis a = analyser.analyse(corpus(), RemoteRepo.CHECK_B, badScope, null);
+        assertFalse(a.loaded());
+        assertTrue(a.storeAvailable());
+        assertEquals(List.of(TestStore.IG_KEY), a.scope().products(), "products from Standards");
+        assertEquals(List.of(), a.scope().datasets());
+        assertEquals(List.of(), a.scope().variables());
+        assertTrue(a.diagnostics().stream().anyMatch(d -> "ERROR".equals(d.severity())),
+                a.diagnostics().toString());
     }
 
 

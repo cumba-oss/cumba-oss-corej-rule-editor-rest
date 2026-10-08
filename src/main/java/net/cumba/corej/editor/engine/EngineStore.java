@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 import net.cumba.corej.core.RuleLanguage;
 import net.cumba.corej.core.metadata.store.MetadataStore;
 import net.cumba.corej.core.metadata.store.StoreFormatException;
@@ -16,18 +17,28 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * The engine's metadata store as this instance sees it, opened once at startup and shared read-only
- * by the analysis (scope universe, completion, tooltips) and handed by path to every run worker
+ * The engine's metadata store as this instance sees it, opened at startup and shared read-only by
+ * the analysis (scope universe, completion, tooltips) and handed by path to every run worker
  * (PLAN-rule-editor §4.2, §5.1.1).
  *
  * <p>
- * ⛔ CDISC Library content comes <b>only</b> from this store (databrowser-meta CLAUDE.md): the
- * editor never seeds, never reads the pickle or the web API. The file is
- * {@code editor.metadata-store}, else the engine's own resolution ({@code CDISC_METADATA_STORE},
- * then {@code -Dcdisc.metadata.store}). A store of another format is refused by the engine
+ * ⛔ CDISC Library content comes <b>only</b> from this store (databrowser-meta CLAUDE.md). The file
+ * is {@code editor.metadata-store}, else the engine's own order ({@code CDISC_METADATA_STORE}, then
+ * {@code -Dcdisc.metadata.store}) — the configured path whether or not the file exists yet, since
+ * {@link StoreSeeding} may create it. A store of another format is refused by the engine
  * ({@link StoreFormatException}) and this instance then runs <em>without</em> a store: analysis
  * still works (scope universe empty, {@code storeAvailable=false} on the wire), a scenario needing
- * the store fails with the engine's own reason. Nothing replaces or rewrites the file.
+ * the store fails with the engine's own reason. Only {@link StoreSeeding} ever writes the file.
+ * </p>
+ *
+ * <p>
+ * ⭐ The store can appear mid-run (owner, 2026-10-08): {@link StoreSeeding} seeds it in the
+ * background and then {@link #reopen(String) reopens} it. Everything a reader sees is one immutable
+ * {@link State} behind a volatile field, so a reader that takes {@link #store()} (or
+ * {@link #status()}) once sees a consistent store, reason and format; a reader that cached anything
+ * derived from the store keys it by {@link #generation()}, which moves whenever the open store
+ * changes. A replaced store is never closed: it is fully in memory and a request may still hold it
+ * ({@link MetadataStore#close()} releases nothing today); {@link #close()} closes the current one.
  * </p>
  *
  * <p>
@@ -39,15 +50,70 @@ import org.springframework.stereotype.Component;
 public final class EngineStore implements AutoCloseable
 {
 
+    /** What the configured store file was found to be. */
+    public enum Condition
+    {
+        /** A store of the engine's format is open. */
+        OPEN,
+        /** No store file is configured. */
+        NOT_CONFIGURED,
+        /** The configured file does not exist (yet). */
+        ABSENT,
+        /** A store of an older format: refused, re-seed once. */
+        OLDER_FORMAT,
+        /** A store written by a newer build: refused, never replaced automatically. */
+        NEWER_FORMAT,
+        /** Not a readable store. */
+        UNREADABLE,
+        /** {@link StoreSeeding} is writing it. */
+        SEEDING,
+        /** {@link StoreSeeding} failed writing it. */
+        SEED_FAILED
+    }
+
+
+    /**
+     * What {@code /api/info} serves, read from one {@link State}.
+     *
+     * @param available
+     *            a store is open
+     * @param formatVersion
+     *            the open store's format, -1 without one
+     * @param reason
+     *            why there is no store; empty when there is one
+     * @param seeding
+     *            a seed (first seed or re-seed) is running right now
+     * @param seedStatus
+     *            the state of the last or ongoing seed, independent of the store's availability
+     *            ("seeding (API)…", "seed failed (API): …", "incomplete (API): …"); empty when
+     *            there is nothing to say (no seed ran, or it completed) — never the key or a server
+     *            path
+     */
+    public record Status(boolean available, int formatVersion, String reason, boolean seeding,
+            String seedStatus)
+    {
+    }
+
+
+    /**
+     * One consistent view: the open store (or null), why there is none, its generation, and the
+     * last or ongoing seed's state (LOW-4: visible while an old store serves).
+     */
+    private record State(@Nullable MetadataStore store, String reason, Condition condition,
+            long generation, boolean seeding, String seedStatus)
+    {
+
+        State withSeed(boolean aSeeding, String aSeedStatus)
+        {
+            return new State(store, reason, condition, generation, aSeeding, aSeedStatus);
+        }
+    }
+
     private static final Logger LOG = LoggerFactory.getLogger(EngineStore.class);
 
     private final @Nullable Path path;
 
-    private final @Nullable MetadataStore store;
-
-    private final String unavailableReason;
-
-    private final boolean formatMismatch;
+    private volatile State state;
 
     @Autowired
     public EngineStore(EditorProperties aProperties)
@@ -56,21 +122,42 @@ public final class EngineStore implements AutoCloseable
     }
 
 
-    @SuppressWarnings("PMD.CloseResource") // the opened store becomes the field; close() closes it
     public EngineStore(@Nullable Path aPath)
     {
         path = aPath;
+        state = open(aPath, 0);
+    }
+
+
+    /** Opens the file; the opened store becomes the state, and {@link #close()} closes it. */
+    private static State open(@Nullable Path aPath, long aGeneration)
+    {
         MetadataStore opened = null;
         String reason = "";
-        boolean mismatch = false;
+        Condition condition = Condition.OPEN;
         if (aPath == null)
         {
             reason = "no metadata store configured (editor.metadata-store / "
                     + StoreMetadataProviderFactory.STORE_ENV + ")";
+            condition = Condition.NOT_CONFIGURED;
+        }
+        else if (Files.isDirectory(aPath))
+        {
+            // LOW-6: never "absent" (a seed would download, then fail to move over a directory)
+            reason = "the configured store path is a directory, not a file";
+            condition = Condition.UNREADABLE;
+            LOG.warn("metadata store path is a directory: {}", aPath);
+        }
+        else if (Files.exists(aPath) && !Files.isRegularFile(aPath))
+        {
+            reason = "the configured store path is not a regular file";
+            condition = Condition.UNREADABLE;
+            LOG.warn("metadata store path is not a regular file: {}", aPath);
         }
         else if (!Files.isRegularFile(aPath))
         {
             reason = "the configured metadata store file does not exist";
+            condition = Condition.ABSENT;
             LOG.warn("metadata store not found: {}", aPath);
         }
         else
@@ -81,18 +168,17 @@ public final class EngineStore implements AutoCloseable
             }
             catch (StoreFormatException e)
             {
-                mismatch = true;
+                condition = e.writtenByNewerBuild() ? Condition.NEWER_FORMAT
+                        : Condition.OLDER_FORMAT;
                 reason = "metadata store refused: " + withoutDirectory(e.describe(), aPath);
             }
             catch (IOException e)
             {
                 reason = "the configured metadata store is unreadable";
+                condition = Condition.UNREADABLE;
                 LOG.warn("metadata store {} unreadable", aPath, e);
             }
         }
-        store = opened;
-        unavailableReason = reason;
-        formatMismatch = mismatch;
         if (opened != null)
         {
             LOG.info("metadata store {} (format {}, {} products, {} CT packages)", aPath,
@@ -103,6 +189,7 @@ public final class EngineStore implements AutoCloseable
         {
             LOG.warn("engine runs WITHOUT a metadata store: {}", reason);
         }
+        return new State(opened, reason, condition, aGeneration, false, "");
     }
 
 
@@ -121,20 +208,48 @@ public final class EngineStore implements AutoCloseable
 
     static @Nullable Path resolve(@Nullable String aConfigured)
     {
-        String configured = aConfigured == null ? "" : aConfigured.strip();
-        return StoreMetadataProviderFactory
-                .resolveConfiguredFile(configured.isEmpty() ? null : configured);
+        return resolve(aConfigured, System::getenv, System::getProperty);
     }
 
 
-    /** The store, when one is open. */
+    /**
+     * The configured store file: {@code aConfigured}, else the environment's
+     * {@link StoreMetadataProviderFactory#STORE_ENV}, else the system property
+     * {@link StoreMetadataProviderFactory#STORE_PROPERTY} — the engine's order, but the path is
+     * kept whether or not the file exists (the engine's resolver drops a missing one; a missing
+     * store is what the seeding creates).
+     */
+    static @Nullable Path resolve(@Nullable String aConfigured, UnaryOperator<String> aEnv,
+            UnaryOperator<String> aProperties)
+    {
+        String configured = aConfigured == null ? "" : aConfigured.strip();
+        if (configured.isEmpty())
+        {
+            configured = blankToEmpty(aEnv.apply(StoreMetadataProviderFactory.STORE_ENV));
+        }
+        if (configured.isEmpty())
+        {
+            configured = blankToEmpty(
+                    aProperties.apply(StoreMetadataProviderFactory.STORE_PROPERTY));
+        }
+        return configured.isEmpty() ? null : Path.of(configured);
+    }
+
+
+    private static String blankToEmpty(@Nullable String aValue)
+    {
+        return aValue == null ? "" : aValue.strip();
+    }
+
+
+    /** The store, when one is open. Take it once per request: it may appear mid-run. */
     public Optional<MetadataStore> store()
     {
-        return Optional.ofNullable(store);
+        return Optional.ofNullable(state.store());
     }
 
 
-    /** The store file, configured or resolved, whether or not it opened. */
+    /** The store file, configured or resolved, whether or not it exists or opened. */
     public Optional<Path> path()
     {
         return Optional.ofNullable(path);
@@ -143,28 +258,121 @@ public final class EngineStore implements AutoCloseable
 
     public boolean available()
     {
-        return store != null;
+        return state.store() != null;
     }
 
 
     /** Why there is no store; empty when there is one. */
     public String unavailableReason()
     {
-        return unavailableReason;
+        return state.reason();
+    }
+
+
+    /** What the configured file was found to be (or that it is being seeded). */
+    public Condition condition()
+    {
+        return state.condition();
     }
 
 
     /** True when a store exists but its format is not the engine's (re-seed once). */
     public boolean formatMismatch()
     {
-        return formatMismatch;
+        Condition c = state.condition();
+        return c == Condition.OLDER_FORMAT || c == Condition.NEWER_FORMAT;
     }
 
 
-    /** The format version the engine expects, for the info endpoint. */
+    /** The format version of the open store, for the info endpoint; -1 without one. */
     public int formatVersion()
     {
-        return store == null ? -1 : store.manifest().formatVersion();
+        MetadataStore open = state.store();
+        return open == null ? -1 : open.manifest().formatVersion();
+    }
+
+
+    /** Availability, format and reason read from ONE state (a store may open in between). */
+    public Status status()
+    {
+        State s = state;
+        MetadataStore open = s.store();
+        return new Status(open != null, open == null ? -1 : open.manifest().formatVersion(),
+                s.reason(), s.seeding(), s.seedStatus());
+    }
+
+
+    /** True exactly while a seed (first seed or re-seed) runs. */
+    public boolean seeding()
+    {
+        return state.seeding();
+    }
+
+
+    /** The last or ongoing seed's state; empty when there is nothing to say. */
+    public String seedStatus()
+    {
+        return state.seedStatus();
+    }
+
+
+    /**
+     * Moves whenever the open store changes (absent → open, or a re-seed replaced it): a cache of
+     * anything derived from the store keys by it, so nothing computed without the store (or from
+     * the previous one) sticks.
+     */
+    public long generation()
+    {
+        return state.generation();
+    }
+
+
+    /**
+     * {@link StoreSeeding} started writing the store: {@link #seeding()} turns true and the seed
+     * status says so; without an open store the reason says so too (an open store keeps serving
+     * until the new one replaces it).
+     */
+    synchronized void seeding(String aReason, String aSeedStatus)
+    {
+        State s = state;
+        state = s.store() == null
+                ? new State(null, aReason, Condition.SEEDING, s.generation(), true, aSeedStatus)
+                : s.withSeed(true, aSeedStatus);
+    }
+
+
+    /**
+     * {@link StoreSeeding} failed (or could not start): the seed status says why, open store or
+     * not; without an open store the reason says so too.
+     */
+    synchronized void seedFailed(String aReason, String aSeedStatus)
+    {
+        State s = state;
+        state = s.store() == null
+                ? new State(null, aReason, Condition.SEED_FAILED, s.generation(), false,
+                        aSeedStatus)
+                : s.withSeed(false, aSeedStatus);
+    }
+
+
+    /**
+     * {@link StoreSeeding} ended without changing the store's availability (a partial seed not
+     * published over an open store, a seed record not written): only the seed status changes.
+     */
+    synchronized void seedNote(String aSeedStatus)
+    {
+        state = state.withSeed(false, aSeedStatus);
+    }
+
+
+    /**
+     * Opens the file again after {@link StoreSeeding} replaced it, and publishes the result in one
+     * step, with the seed's final status. The previous store is not closed (a request may still
+     * hold it).
+     */
+    synchronized void reopen(String aSeedStatus)
+    {
+        state = open(path, state.generation() + 1).withSeed(false, aSeedStatus);
     }
 
 
@@ -180,9 +388,6 @@ public final class EngineStore implements AutoCloseable
     @Override
     public void close()
     {
-        if (store != null)
-        {
-            store.close();
-        }
+        Optional.ofNullable(state.store()).ifPresent(MetadataStore::close);
     }
 }

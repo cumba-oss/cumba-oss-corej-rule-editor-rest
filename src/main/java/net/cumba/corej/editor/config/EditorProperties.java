@@ -45,6 +45,8 @@ public class EditorProperties
 
     private final Brand brand = new Brand();
 
+    private final Store store = new Store();
+
     public Repository getRepository()
     {
         return repository;
@@ -107,6 +109,13 @@ public class EditorProperties
     public void setMetadataStore(@Nullable String aMetadataStore)
     {
         metadataStore = aMetadataStore;
+    }
+
+
+    /** {@code editor.store.*}: how this instance seeds its metadata store. */
+    public Store getStore()
+    {
+        return store;
     }
 
 
@@ -784,6 +793,103 @@ public class EditorProperties
         public void setDirectory(@Nullable String aDirectory)
         {
             directory = aDirectory;
+        }
+    }
+
+
+    /**
+     * {@code editor.store.*} — the metadata store this instance seeds for itself (owner,
+     * 2026-10-08): at start-up, in the background, when the store file is absent, refused for an
+     * OLDER format, or was seeded by this instance from another source than the configured one.
+     * Read by {@code StoreSeeding}; documented in {@code application.yaml}.
+     */
+    public static class Store
+    {
+
+        private final Seed seed = new Seed();
+
+        public Seed getSeed()
+        {
+            return seed;
+        }
+    }
+
+
+    /** {@code editor.store.seed.type}. */
+    public enum SeedType
+    {
+        /** The Python engine's pickles of a cdisc-rules-engine tag on GitHub (no key needed). */
+        GITHUB_PKL,
+        /** The CDISC Library API (needs {@code api-key}). */
+        API,
+        /** Never seed: the store is mounted by hand. */
+        NONE
+    }
+
+
+    /** {@code editor.store.seed.*}. */
+    public static class Seed
+    {
+
+        /** The default {@code pkl-tag}: a tag of github.com/cdisc-org/cdisc-rules-engine. */
+        public static final String DEFAULT_PKL_TAG = "v0.17.1";
+
+        private SeedType type = SeedType.GITHUB_PKL;
+
+        private String pklTag = DEFAULT_PKL_TAG;
+
+        private @Nullable String apiKey;
+
+        public SeedType getType()
+        {
+            return type;
+        }
+
+
+        public void setType(SeedType aType)
+        {
+            type = aType;
+        }
+
+
+        /**
+         * The cdisc-rules-engine tag whose {@code resources/cache} pickles {@code GITHUB_PKL}
+         * reads.
+         */
+        public String getPklTag()
+        {
+            return pklTag;
+        }
+
+
+        public void setPklTag(String aPklTag)
+        {
+            pklTag = aPklTag;
+        }
+
+
+        /**
+         * The CDISC Library API key {@code API} seeds with. ⛔ A secret: never logged, never served
+         * (not in {@code /api/info}, not in a reason or an error).
+         */
+        public @Nullable String getApiKey()
+        {
+            return apiKey;
+        }
+
+
+        public void setApiKey(@Nullable String aApiKey)
+        {
+            apiKey = aApiKey;
+        }
+
+
+        /** Never the key: only whether one is set. */
+        @Override
+        public String toString()
+        {
+            return "Seed[type=" + type + ", pklTag=" + pklTag + ", apiKey="
+                    + (apiKey == null || apiKey.isBlank() ? "<unset>" : "<set>") + "]";
         }
     }
 }

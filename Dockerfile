@@ -1,31 +1,93 @@
+# syntax=docker/dockerfile:1
 # The rule editor's REST service as a container (PLAN-rule-editor §4.2, RE-Q6).
 #
-# Built FROM THE EXPLODED DISTRIBUTION, not from the sources: `mvn package` (or
-# `mvn verify`) assembles target/cumba-oss-corej-rule-editor-rest-<version>/… — the
-# cumba-oss-bootstrap launcher, lib/, config/ and the sidecar .conf — and this file
-# only copies that tree in. So the image runs exactly the bundle the smoke test
-# started (src/test/smoke.sh), and the build arguments name the version:
+# Built FROM THE SOURCES, in two stages, so `docker compose up --build` (or `docker build`)
+# needs nothing built beforehand and can never package a stale target/:
 #
-#     mvn -B clean package
-#     docker build --build-arg VERSION=0.1.0-SNAPSHOT -t rule-editor-rest .
+#   build    Maven runs `clean package -DskipTests` on this repo, which assembles the exploded
+#            distribution target/cumba-oss-corej-rule-editor-rest-<version>/… — the
+#            cumba-oss-bootstrap launcher, lib/, config/ and the sidecar .conf, the bundle
+#            src/test/smoke.sh starts;
+#   runtime  a JRE image that copies only that tree in.
 #
-# With the SPA bundled (deployment shape 1 — one container serves the UI at /):
+# ⚠ WHERE THE DEPENDENCIES COME FROM. With no settings, from Maven Central: every third-party
+# dependency, and every RELEASED cumba-oss-* artifact. Central hosts no snapshots. So:
+#
+#   - a RELEASE of this repository (its dependency.cumba-oss-*.version properties flipped to
+#     released versions, as a release commit does) builds with NO secret at all:
+#
+#         docker build -t rule-editor-rest .
+#
+#   - `main` between releases pins the cumba-oss-* DEVELOPMENT snapshots, which are published
+#     to the project's own snapshot repository, not to Central. Built with no settings it stops
+#     at the first of them ("Could not find artifact net.cumba:cumba-oss-bootstrap:jar:
+#     <version>-SNAPSHOT"). It needs a Maven settings.xml naming a repository that serves those
+#     snapshots (or a mirror of one), passed as the OPTIONAL build secret `maven_settings` —
+#     mounted for the one RUN, never stored in a layer:
+#
+#         docker build --secret id=maven_settings,src=$HOME/.m2/settings.xml -t rule-editor-rest .
+#         podman build --secret id=maven_settings,src=$HOME/.m2/settings.xml -t rule-editor-rest .
+#
+#     (docker-compose.yml: a docker-compose.override.yml adds the secret, see its header.)
+#     Without such a repository: `mvn install` the cumba-oss-* chain bottom-up (commons,
+#     formats, datatable, corej) and run this repo's distribution on the host instead
+#     (README.md, "Running the distribution").
+#
+# docker/maven-global-settings.xml (passed as -gs) enables SNAPSHOT resolution on `central` —
+# the build starts from an empty local repository, Maven's built-in central has snapshots off,
+# and a `*` mirror in your settings inherits that. Without a secret it changes nothing (Central
+# serves no snapshot either way). The local Maven repository is a build CACHE mount (pinned by
+# -Dmaven.repo.local, whatever <localRepository> the settings name): the first build downloads
+# everything, later ones only what changed. Only the bundle is built — no tests, no Spotless,
+# no javadoc: those are this repo's CI gate.
+#
+# ⚠ UPSTREAM SNAPSHOTS (the cumba-oss-* engine, commons and datatable development lines). -U
+# makes Maven re-check the snapshot repository whenever the step runs (without it the cache
+# mount keeps a snapshot, or a "not found" marker, for 24 h). But the step only runs when THIS
+# repo's sources changed: after a fix published only upstream, the build layer is CACHED and
+# the image keeps the old engine. Rebuild that one stage without the layer cache:
+#
+#     docker compose build --no-cache rule-editor-rest && docker compose up -d
+#
+# With the SPA bundled (deployment shape 1 — one container serves the UI at /) build the bundle
+# outside docker instead:
 #
 #     mvn -B -Pbundle-web clean package -Dweb.dist.dir=../cumba-oss-corej-rule-editor-web/dist
 #
 # Otherwise the jar is API-only (shape 2) and docker-compose.yml puts the SPA's nginx
 # in front of it.
 #
-# ⚠ Not built in CI yet (the deployment host is an owner decision, PLAN-rule-editor
-# §8.5), and the sandbox this was written in has no docker: the file is checked for
-# shape, not by a build. Verify the first build by running the smoke test's steps
-# against the container.
+# ⚠ Not built in CI (the deployment host is an owner decision, PLAN-rule-editor §8.5), and the
+# sandbox this was written in has no container runtime: the Maven step was run outside a
+# container on a source export, the image build itself is verified on the owner's host.
+ARG MAVEN_IMAGE=maven:3.9.12-eclipse-temurin-25
 ARG JRE_IMAGE=eclipse-temurin:25-jre
+
+FROM ${MAVEN_IMAGE} AS build
+WORKDIR /src
+# The context is the repo minus target/ and .git (.dockerignore). Without .git the
+# git-commit-id plugin writes no commit (failOnNoGitDirectory=false) — the build stays green.
+COPY . .
+# The exploded `dir` assembly nests <baseDirectory> inside <finalName>, hence the doubled
+# directory; exactly one must exist, whatever the version, so the runtime stage needs no
+# VERSION argument. The settings secret is optional (required=false): absent or empty, Maven
+# runs on its defaults (Maven Central).
+RUN --mount=type=secret,id=maven_settings,required=false \
+    --mount=type=cache,target=/root/.m2/repository \
+    set -- \
+    && if [ -s /run/secrets/maven_settings ]; then set -- -s /run/secrets/maven_settings; fi \
+    && mvn -B -U -gs docker/maven-global-settings.xml "$@" \
+           -Dmaven.repo.local=/root/.m2/repository \
+           clean package -DskipTests -Dspotless.apply.skip=true -Dmaven.javadoc.skip=true \
+    && set -- target/cumba-oss-corej-rule-editor-rest-*/cumba-oss-corej-rule-editor-rest-*/ \
+    && if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then \
+        echo "rule-editor-rest build: expected ONE exploded bundle, found: $*" >&2; exit 1; \
+    fi \
+    && mkdir /bundle && cp -a "$1". /bundle/
+
 FROM ${JRE_IMAGE}
 
-ARG VERSION=0.1.0-SNAPSHOT
-# The exploded `dir` assembly nests <baseDirectory> inside <finalName>, hence the doubled path.
-COPY target/cumba-oss-corej-rule-editor-rest-${VERSION}/cumba-oss-corej-rule-editor-rest-${VERSION}/ /opt/rule-editor/
+COPY --from=build /bundle/ /opt/rule-editor/
 
 # git is NOT needed: every git operation is JGit, in-process. A non-root user owns the
 # workspaces (one clone per forge user, §5.1.5) and nothing else.
@@ -54,9 +116,9 @@ WORKDIR /var/lib/rule-editor
 # missing location ("Config data location '/etc/rule-editor/' does not exist"). Empty is
 # fine — the packaged defaults and the environment then apply.
 ENV COREJ_CONFIG_DIR=/etc/rule-editor
-# The workspaces survive a container replacement; the metadata store (a FILE seeded at
-# the engine's store format 5, named by CDISC_METADATA_STORE) lives in a second volume —
-# see docker-compose.yml. Every run is a child JVM started from /opt/rule-editor/lib/*.
+# The workspaces survive a container replacement; the metadata store (a FILE at the
+# engine's store format 5, named by CDISC_METADATA_STORE — the service seeds it at
+# start-up when the volume holds none) lives in a second volume — see docker-compose.yml. Every run is a child JVM started from /opt/rule-editor/lib/*.
 VOLUME ["/var/lib/rule-editor/workspaces", "/var/lib/rule-editor/metadata-store"]
 EXPOSE 8081
 

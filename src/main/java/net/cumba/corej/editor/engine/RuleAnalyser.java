@@ -42,6 +42,15 @@ import org.springframework.stereotype.Component;
  * never a re-implementation of the scope), the {@code Authorities} from the parked rule's canonical
  * node; its diagnostics stay the parked assembly's.
  * </p>
+ *
+ * <p>
+ * The scope universe (the editor's variable completion) depends on the rule's {@code Scope} and
+ * {@code Standards} only, never on the expression (owner, 2026-10-08): while the author types, the
+ * buffer is often momentarily unloadable ({@code empty(}). When neither the buffer nor its unparked
+ * reading loads, the universe is judged by the {@link #scopeOnly} reading of the check — its Core,
+ * Scope and Standards around a trivially valid Check. Only the universe: the diagnostics, derived
+ * fields, references and bindings keep describing the real buffer.
+ * </p>
  */
 @Component
 public class RuleAnalyser
@@ -94,7 +103,53 @@ public class RuleAnalyser
         {
             insight = unparked(object, docs, packageStandards);
         }
-        return toAnalysis(assembled, check, insight);
+        Rule scopeRule = insight;
+        if (scopeRule == null && check instanceof ObjectNode object)
+        {
+            // the author is mid-edit (`empty(`): the variables depend on the Scope alone, so they
+            // must not vanish with the expression (owner, 2026-10-08)
+            scopeRule = scopeOnly(object, packageStandards);
+        }
+        return toAnalysis(assembled, check, insight, scopeRule);
+    }
+
+    /**
+     * The fields the scope-only reading keeps from the authored check: the identity ({@code Core}),
+     * the {@code Scope} the universe is judged by, and the {@code Standards} the package is
+     * declared with. Everything else — the {@code Check}, {@code Bindings}, {@code Expansion},
+     * {@code Match_Datasets}, {@code Outcome}, {@code Requirements}, the wildcards,
+     * {@code Executability}, the authored {@code Sensitivity} — is dropped or replaced: it is what
+     * the author is editing, and none of it is read by the scope universe.
+     */
+    static final List<String> SCOPE_ONLY_FIELDS = List.of("Core", "Scope", "Standards");
+
+    /**
+     * The rule the check's {@code Scope} alone loads as, for the scope universe when the check
+     * itself does not load: the {@link #SCOPE_ONLY_FIELDS} with a trivially valid {@code Check}, a
+     * placeholder {@code Description} and {@code Outcome} and an explicit {@code Sensitivity} (so
+     * no derivation can fail), assembled and loaded through the same {@code AuthoredRuleAssembler}
+     * path as the buffer — the engine's reading of the Scope, never a re-implementation.
+     * {@code null} when even that does not load (an invalid Scope, Core or Standards): the universe
+     * then stays empty.
+     */
+    static @Nullable Rule scopeOnly(ObjectNode aCheck, List<StandardRef> aPackageStandards)
+    {
+        ObjectNode minimal = aCheck.objectNode();
+        for (String field : SCOPE_ONLY_FIELDS)
+        {
+            JsonNode value = aCheck.get(field);
+            if (value != null)
+            {
+                minimal.set(field, value.deepCopy());
+            }
+        }
+        minimal.put("Description", "scope only");
+        minimal.put("Sensitivity", "Record");
+        minimal.putObject("Check").put("expression", "true");
+        minimal.putObject("Outcome").put("Message", "scope only");
+        // JSON is YAML: the assembler reads the node's text as it reads the buffer; no docs —
+        // the citations are not read by the scope
+        return AuthoredRuleAssembler.assemble(minimal.toString(), null, aPackageStandards).rule();
     }
 
 
@@ -146,19 +201,24 @@ public class RuleAnalyser
 
     Analysis toAnalysis(AssembledRule aAssembled, @Nullable JsonNode aCheck)
     {
-        return toAnalysis(aAssembled, aCheck, aAssembled.rule());
+        return toAnalysis(aAssembled, aCheck, aAssembled.rule(), aAssembled.rule());
     }
 
 
     /**
      * @param aInsight
-     *            the rule the derived fields, references and scope are read from: the assembled
-     *            one, or for a parked rule its {@link #unparked} reading (null when neither loads)
+     *            the rule the derived fields and references are read from: the assembled one, or
+     *            for a parked rule its {@link #unparked} reading (null when neither loads)
+     * @param aScopeRule
+     *            the rule the scope universe is judged by: {@code aInsight}, or when that is null
+     *            the {@link #scopeOnly} reading of the check (null when that does not load either)
      */
-    @SuppressWarnings("PMD.CloseResource") // the store is shared, owned and closed by EngineStore
     Analysis toAnalysis(AssembledRule aAssembled, @Nullable JsonNode aCheck,
-            @Nullable Rule aInsight)
+            @Nullable Rule aInsight, @Nullable Rule aScopeRule)
     {
+        // ONE read: the store may open mid-run (StoreSeeding), and the scope and storeAvailable
+        // must describe the same store
+        MetadataStore open = store.store().orElse(null);
         List<Analysis.Diagnostic> diagnostics = new ArrayList<>();
         for (RuleDiagnostic d : aAssembled.diagnostics())
         {
@@ -184,16 +244,15 @@ public class RuleAnalyser
             {
                 refs.add(new Analysis.VariableRef(r.name(), r.where(), r.quoted()));
             }
-            MetadataStore open = store.store().orElse(null);
-            if (open != null && !products.isEmpty())
-            {
-                ScopeUniverse universe = RuleInsight.scopeUniverse(rule, open, products);
-                scope = toScope(open, universe, products);
-            }
+        }
+        if (aScopeRule != null && open != null && !products.isEmpty())
+        {
+            ScopeUniverse universe = RuleInsight.scopeUniverse(aScopeRule, open, products);
+            scope = toScope(open, universe, products);
         }
         return new Analysis(aAssembled.coreId(), aAssembled.rule() != null, aAssembled.parked(),
                 diagnostics, derived, scope, refs, bindingsOf(aCheck), requiredVariablesOf(aCheck),
-                store.available());
+                open != null);
     }
 
 

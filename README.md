@@ -193,11 +193,38 @@ branch declares none): the SPA's engine-version banner compares the two (O13).
   canonical node. A class variable (`--ENDTC`) lists the concrete ones (`AEENDTC`) whose prefix
   is an in-scope dataset.
 - **The metadata store** (`editor.metadata-store`, else `CDISC_METADATA_STORE`, else
-  `-Dcdisc.metadata.store`) is opened once at startup and shared read-only; the run workers get
-  its path. ⛔ CDISC Library content comes only from it — the editor never seeds, never reads the
-  pickle or the web API. A store of another format is refused by the engine and the instance runs
-  without one (`engine.storeAvailable=false`: scope completion empty, library tooltips absent,
-  a scenario needing the Library fails with the engine's reason).
+  `-Dcdisc.metadata.store` — the configured path, whether or not the file exists yet) is opened
+  at startup and shared read-only; the run workers get its path. ⛔ CDISC Library content comes
+  only from it — the pickle and the web API are read by the start-up seed alone, to write it. A
+  store of another format is refused by the engine and the instance runs without one
+  (`engine.storeAvailable=false`: scope completion empty, library tooltips absent, a scenario
+  needing the Library fails with the engine's reason).
+- **The start-up seed** (`StoreSeeding`, owner 2026-10-08): `editor.store.seed.type` =
+  `GITHUB_PKL` (default; the pickles of the cdisc-rules-engine tag `editor.store.seed.pkl-tag`,
+  default `v0.17.1`), `API` (the CDISC Library with `editor.store.seed.api-key` — never logged,
+  never served) or `NONE`; environment `EDITOR_STORE_SEED_TYPE` / `_PKL_TAG` / `_API_KEY`. At
+  start, in the BACKGROUND, the engine's own seeders (`PickleStoreSeeder`, `WebApiStoreSeeder`,
+  as the coreJ CLI drives them) write the store when the file is absent, refused for an OLDER
+  format, or was seeded by this instance (its seed record `<store>.seed.json`: type, tag,
+  seededAt, source, complete) from another type or tag than configured, incompletely (a fetch
+  failed: published only when no store was open, re-seeded at the next start; over an open store
+  it is dropped) or never recorded (a PENDING record: the process died after the move). An OLDER
+  format is re-seeded with or without a seed record; a NEWER format is never replaced; a store of
+  the current format without a seed record is left alone (mounted by hand), and so is an
+  unreadable one (a directory at the path included). One seed per store file: the seed holds
+  `<store>.seed.lock` (another process holding it ⇒ no seed, the status says so); an interrupted
+  seed's leftovers (`<store>.seed-staging-*`, `<store>.seed-scratch-*`) are swept under that lock
+  on every start, `NONE` included. `engine.seeding` (true exactly while a seed runs) and
+  `engine.seedStatus` (the last or ongoing seed's state — `seeding (API)…`, `seed failed (API): …`,
+  `incomplete (API): …`; empty when there is nothing to say) report the seed whether or not a store
+  is open; `engine.storeReason` keeps meaning "why there is no store". The service
+  serves at once: until the seed is done `engine.storeReason` says `metadata store is being seeded
+  (GITHUB_PKL v0.17.1)…` (a failure: its reason, the service runs on without a store); an open
+  store being re-seeded for a changed source keeps serving meanwhile. The new store is written
+  beside the final file, opened to prove it, moved over it atomically, then opened in place —
+  without a restart; whatever was derived from the store (the corpus index's class map) is keyed
+  by the store's generation, so nothing computed without it sticks. Force a re-seed: delete the
+  store file and restart.
 - **Runs are child JVM workers** (§5.8.5): `RunWorker` reads the job on stdin and writes the
   report on stdout; `-Xmx editor.run.max-heap`, `-XX:+ExitOnOutOfMemoryError`, killed past
   `editor.run.timeout` (`ABORTED TIMEOUT`); at most `editor.run.max-concurrent` at once and
@@ -289,12 +316,17 @@ own. No corpus directory is shipped: the rules come from git, per user.
    `docker/nginx.conf` is the reference. Sibling subdomains of one site also work: list the SPA's
    origin in `editor.cors.allowed-origins` and set `server.servlet.session.cookie.domain`.
    ⛔ Cross-site is not supported (`SameSite=Lax` cookie, session-bound CSRF token).
-3. **`docker-compose.yml`** — `rule-editor-rest` (this `Dockerfile`, built from the exploded
-   bundle; `workspaces` and `metadata-store` volumes) + `rule-editor-web` (the web repo's nginx;
+3. **`docker-compose.yml`** — `rule-editor-rest` (this `Dockerfile`, a multi-stage build FROM
+   THE SOURCES: Maven inside the image, resolving from Maven Central — enough for a release; the
+   `cumba-oss-*` development snapshots `main` pins between releases are not on Central and need a
+   `settings.xml` naming a repository that serves them, as the optional build secret
+   `maven_settings` (the `Dockerfile`'s header); `workspaces` and `metadata-store` volumes) + `rule-editor-web` (the web repo's nginx;
    `BRAND=<name>` selects its brand, passed through as `${BRAND:-neutral}`).
-   ⚠ Written without docker available: shape-checked, not run. The metadata store is a FILE
-   seeded separately at the engine's store format (5), placed in the `metadata-store` volume as
-   `metadata-store.zip` — see the compose file's header; the run workers' memory is
+   `docker compose up --build` is the whole build (the web repo's `DOCKER.md`); run for real on
+   rootless Podman since 2026-10-08. The metadata store is a FILE in the `metadata-store`
+   volume (`metadata-store.zip`, the engine's store format 5) that the service seeds itself on
+   the first start (`EDITOR_STORE_SEED_TYPE` `GITHUB_PKL` by default, `EDITOR_STORE_SEED_PKL_TAG`
+   `v0.17.1`, `EDITOR_STORE_SEED_API_KEY` for `API`) — see the compose file's header; the run workers' memory is
    `EDITOR_RUN_MAX_HEAP` × `EDITOR_RUN_MAX_CONCURRENT` on top of `JAVA_OPTS`. Secure by default
    (security review M3): the nginx port is published on `127.0.0.1` only and the cookie is
    `Secure` — put a TLS-terminating proxy in front to serve other machines; `COOKIE_SECURE=false`
@@ -314,5 +346,6 @@ does what the SPA does: login (expects `EDIT`, which proves the identity, reposi
 receive-pack probes and the clone over HTTP), explorer, new branch, open, save with the stamp, read
 back, commit, push — then reads the commit out of the fixture's bare repository. CI runs it after
 `install`. Since phase 3 it also analyses the edited rule and runs it against the seeded
-scenario in a child worker started from the bundle's `lib/*` — with no metadata store
-configured (the analysis reports `storeAvailable=false`).
+scenario in a child worker started from the bundle's `lib/*` — with no metadata store (the
+bundle's store file is absent and `editor.store.seed.type` is `NONE`, so the smoke stays offline;
+the analysis reports `storeAvailable=false`).

@@ -173,6 +173,11 @@ editor:
     type: gitea
     api-url: http://127.0.0.1:$forge_port/api/v1
   workspace-root: $work/workspaces
+  # the bundle's .conf names a store file, absent here: no start-up seed (the smoke stays
+  # offline and runs WITHOUT a store, asserted below)
+  store:
+    seed:
+      type: NONE
 EOF
 
 log="$work/service.log"

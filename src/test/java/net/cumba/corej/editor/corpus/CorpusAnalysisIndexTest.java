@@ -7,13 +7,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import net.cumba.corej.editor.config.EditorProperties;
 import net.cumba.corej.editor.engine.EngineStore;
 import net.cumba.corej.editor.engine.PackageStandards;
+import net.cumba.corej.editor.engine.StoreSeedSource;
+import net.cumba.corej.editor.engine.StoreSeeding;
 import net.cumba.corej.editor.git.ChangedFile;
 import net.cumba.corej.editor.git.CorpusSource;
 import net.cumba.corej.editor.testing.MapSource;
@@ -23,6 +28,7 @@ import net.cumba.corej.editor.web.Access;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** The semantic search over the assembled corpus and its per-view cache (§5.3). */
 class CorpusAnalysisIndexTest
@@ -143,6 +149,35 @@ class CorpusAnalysisIndexTest
                 "a -- query finds the -- form and its concrete spellings");
         var lower = new CorpusAnalysisIndex.Filter("aeterm", null, null, null, null, null, false);
         assertEquals(2, index.search(v, "", lower, 100).total(), "case-insensitive");
+    }
+
+
+    @Test
+    void anIndexBuiltWithoutTheStoreDoesNotStickOnceTheStoreIsSeeded(@TempDir Path aDir)
+        throws Exception
+    {
+        // the store appears mid-run (StoreSeeding): the class map of an index built without it
+        // must not stick, or the --TERM rule never reaches AETERM until a restart
+        try (EngineStore late = new EngineStore(aDir.resolve("metadata-store.zip")))
+        {
+            CorpusAnalysisIndex lateIndex = new CorpusAnalysisIndex(late, standards);
+            Access.View v = view(corpus(), "h1", Map.of());
+            var filter = new CorpusAnalysisIndex.Filter("AETERM", null, null, null, null, null,
+                    false);
+            assertEquals(List.of(RemoteRepo.RULE_B), ids(lateIndex.search(v, "", filter, 100)),
+                    "without the store no class reaches AE");
+            StoreSeedSource fixture = (aRequest, aStaging) ->
+            {
+                TestStore.write(aStaging);
+                return new StoreSeedSource.Outcome("fixture", 2, 1, List.of(), null);
+            };
+            new StoreSeeding(late, new EditorProperties(), fixture).start().orElseThrow().get(30,
+                    TimeUnit.SECONDS);
+            assertTrue(late.available(), late.unavailableReason());
+            assertEquals(List.of("CDISC-CG0001", RemoteRepo.RULE_B),
+                    ids(lateIndex.search(v, "", filter, 100)),
+                    "the same view, re-indexed against the seeded store");
+        }
     }
 
 

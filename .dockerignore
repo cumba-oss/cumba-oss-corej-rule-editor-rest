@@ -1,4 +1,12 @@
-# Only the exploded distribution reaches the image (Dockerfile): keep the context small
-# and keep sources, caches and git out of it.
-*
-!target/cumba-oss-corej-rule-editor-rest-*/
+# The build stage compiles from the SOURCES (Dockerfile): send the repo, minus build output
+# (a stale target/ must never reach the image), git metadata and IDE files.
+target/
+.git
+.gitea/
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+*.iml
+.flattened-pom.xml

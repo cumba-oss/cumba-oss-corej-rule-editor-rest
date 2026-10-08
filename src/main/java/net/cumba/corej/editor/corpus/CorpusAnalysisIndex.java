@@ -304,13 +304,17 @@ public class CorpusAnalysisIndex
      */
     public Index of(Request aRequest) throws IOException
     {
-        Index cached = cached(aRequest.key());
+        // The store's generation is part of the key: the class map is read from the store, which
+        // may open mid-run (StoreSeeding) — an index built without it must not stick. Read BEFORE
+        // the build, so an index that raced a store change is filed under the older generation.
+        String key = store.generation() + "#" + aRequest.key();
+        Index cached = cached(key);
         if (cached != null)
         {
             return cached;
         }
         CompletableFuture<Index> mine = new CompletableFuture<>();
-        CompletableFuture<Index> running = inflight.putIfAbsent(aRequest.key(), mine);
+        CompletableFuture<Index> running = inflight.putIfAbsent(key, mine);
         if (running != null)
         {
             return await(running);
@@ -318,13 +322,13 @@ public class CorpusAnalysisIndex
         try
         {
             // the winner of a race that a build finished in between finds it cached now
-            Index built = cached(aRequest.key());
+            Index built = cached(key);
             if (built == null)
             {
                 built = build(aRequest);
                 synchronized (cache)
                 {
-                    cache.put(aRequest.key(), built);
+                    cache.put(key, built);
                 }
             }
             mine.complete(built);
@@ -337,7 +341,7 @@ public class CorpusAnalysisIndex
         }
         finally
         {
-            inflight.remove(aRequest.key(), mine);
+            inflight.remove(key, mine);
         }
     }
 
