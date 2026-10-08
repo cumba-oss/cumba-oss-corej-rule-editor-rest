@@ -22,6 +22,10 @@ import org.jspecify.annotations.Nullable;
  *            the derived fields, or {@code null} when no rule loaded
  * @param scope
  *            the scope universe, empty entries when no store is open
+ * @param joined
+ *            the datasets the rule's keyed {@code Match_Datasets} entries join, in authored order,
+ *            one per distinct name, each with the variables its qualified references
+ *            ({@code DM.RFSTDTC}) can name — see {@link Joined}
  * @param referencedVariables
  *            every variable the rule names
  * @param bindings
@@ -33,13 +37,15 @@ import org.jspecify.annotations.Nullable;
  *            whether the scope universe was computed against a store
  */
 public record Analysis(String coreId, boolean loaded, boolean parked, List<Diagnostic> diagnostics,
-        @Nullable Derived derived, Scope scope, List<VariableRef> referencedVariables,
-        List<String> bindings, List<String> requiredVariables, boolean storeAvailable)
+        @Nullable Derived derived, Scope scope, List<Joined> joined,
+        List<VariableRef> referencedVariables, List<String> bindings,
+        List<String> requiredVariables, boolean storeAvailable)
 {
 
     public Analysis
     {
         diagnostics = List.copyOf(diagnostics);
+        joined = List.copyOf(joined);
         referencedVariables = List.copyOf(referencedVariables);
         bindings = List.copyOf(bindings);
         requiredVariables = List.copyOf(requiredVariables);
@@ -149,6 +155,58 @@ public record Analysis(String coreId, boolean loaded, boolean parked, List<Diagn
         public static Scope empty(List<String> aProducts)
         {
             return new Scope(aProducts, List.of(), List.of(), List.of());
+        }
+    }
+
+
+    /**
+     * One dataset a keyed {@code Match_Datasets} entry joins (owner, 2026-10-08: completion of
+     * {@code DM.RFSTDTC} on an AE rule). Only an ordinary keyed entry with a plain dataset name
+     * qualifies: no {@code Child: true} parent (its columns are the parent domain's, whatever the
+     * name), no {@code RELREC}, no {@code --} or {@code &TOKEN&} template name (a {@code SUPP--} /
+     * {@code SQAP--} family included: it names the primary's own family, resolved per dataset).
+     *
+     * <p>
+     * <b>What resolves.</b> The variables are looked up by the name as the store knows it: a
+     * standard SDTM / SEND dataset name ({@code DM}, {@code AE}) and an ADaM IG's data structure
+     * name ({@code ADSL} — in practice the only ADaM name a join uses that the store declares). An
+     * ADaM dataset such as {@code ADAE}, a sponsor dataset, or an SDTM split member ({@code LB1})
+     * is listed with <b>empty</b> variables: the store declares no dataset of that name, and the
+     * engine derives a split's base from the dataset's {@code DOMAIN} data, never from the name
+     * ({@code ScopeMatcher}: {@code FAAE} is a split of {@code FA}), so no name heuristic is
+     * applied here. A keyed supplemental family ({@code SUPPAE}, {@code SQAPAE}) — a valid partner
+     * whose columns are the raw supplemental columns ({@code SUPPAE.QNAM}) — is served the IG's
+     * {@code SUPPQUAL} variables, the one supplemental dataset the store declares.
+     * </p>
+     *
+     * @param name
+     *            the dataset name as first authored
+     * @param joinType
+     *            the entry's {@code Join_Type} as the engine reads it, lower case: {@code "inner"}
+     *            or {@code "left"} ({@code JoinType}, matched ignoring case, never trimmed), and
+     *            {@code "inner"} when absent or blank — the default {@code
+     *            RulePackageLoader.normalizeJoinTypes} stamps. An unrecognised value is passed
+     *            through lower-cased (the rule then fails to load and the diagnostics name it). ⭐
+     *            {@code <Name>._matched_} is accepted <b>only when this is {@code "left"}</b>: for
+     *            every other value the engine refuses the flag ({@code
+     *            StageAErrorKind.MATCHED_FLAG_INNER_JOIN}, constant-true under an inner join) — for
+     *            a supplemental family too, which keeps every primary row whatever its
+     *            {@code Join_Type} but whose absent value is still stamped {@code inner}
+     * @param variables
+     *            the concrete variables the store declares for that dataset in the rule's
+     *            standards, judged by the engine exactly as a rule scoped to that one dataset;
+     *            class-level {@code --} entries are left out — the engine resolves a joined
+     *            {@code AE.--TERM} with the <b>primary's</b> prefix
+     *            ({@code CheckConditionTransformer.resolveTextWildcard}), so on a CM rule it would
+     *            read {@code AE.CMTERM}, never {@code AE.AETERM}; empty without a store (the entry
+     *            is still listed) and for a name the store does not declare (see above)
+     */
+    public record Joined(String name, String joinType, List<Variable> variables)
+    {
+
+        public Joined
+        {
+            variables = List.copyOf(variables);
         }
     }
 

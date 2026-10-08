@@ -9,16 +9,20 @@ import net.cumba.corej.core.metadata.store.StoreProvenance;
 import net.cumba.corej.core.metadata.store.StoredClass;
 import net.cumba.corej.core.metadata.store.StoredCodelist;
 import net.cumba.corej.core.metadata.store.StoredCtPackage;
+import net.cumba.corej.core.metadata.store.StoredDataStructure;
 import net.cumba.corej.core.metadata.store.StoredDataset;
 import net.cumba.corej.core.metadata.store.StoredProduct;
 import net.cumba.corej.core.metadata.store.StoredTerm;
 import net.cumba.corej.core.metadata.store.StoredVariable;
+import net.cumba.corej.core.metadata.store.StoredVariableSet;
 
 /**
  * A miniature metadata store at the engine's format, written with the engine's own writer: SDTMIG
- * 3.4 with AE (Events), TS (Trial Design) and DM (Special Purpose) and their variables, the SDTM
- * 2.0 model with the Events class variables in {@code --} form, and one CT package holding the SEX
- * codelist. ⛔ Fixture data, never CDISC Library content from the pickle or the web API.
+ * 3.4 with AE (Events), TS (Trial Design), DM (Special Purpose) and SUPPQUAL (Relationship) and
+ * their variables, the SDTM 2.0 model with the Events class variables in {@code --} form, ADaMIG
+ * 1.3 with the ADSL (its treatment variable in the Library's {@code TRTxxP} template spelling) and
+ * BDS data structures, and one CT package holding the SEX codelist. ⛔ Fixture data, never CDISC
+ * Library content from the pickle or the web API.
  */
 public final class TestStore
 {
@@ -26,6 +30,9 @@ public final class TestStore
     public static final String IG_KEY = "standards/sdtmig/3-4";
 
     public static final String MODEL_KEY = "models/sdtm/2-0";
+
+    /** ADaMIG 1.3: no datasets, only the ADSL and BDS data structures (as the real product). */
+    public static final String ADAM_KEY = "standards/adam/adamig-1-3";
 
     public static final String CT_PACKAGE = "sdtmct-2024-03-29";
 
@@ -64,9 +71,9 @@ public final class TestStore
      */
     public static void write(Path aFile, String aRef) throws IOException
     {
-        new MetadataStoreWriter().addProduct(ig()).addProduct(model()).addCtPackage(ct())
-                .publishedCtPackages(List.of(CT_PACKAGE))
-                .productCatalogue(List.of(IG_KEY, MODEL_KEY))
+        new MetadataStoreWriter().addProduct(ig()).addProduct(model()).addProduct(adam())
+                .addCtPackage(ct()).publishedCtPackages(List.of(CT_PACKAGE))
+                .productCatalogue(List.of(IG_KEY, MODEL_KEY, ADAM_KEY))
                 .addProvenance(new StoreProvenance("fixture", aRef, "2026-10-06T00:00:00Z"))
                 .write(aFile);
     }
@@ -105,18 +112,58 @@ public final class TestStore
         StoredDataset dm = new StoredDataset("DM", "Demographics", "1", null,
                 List.of(var("STUDYID", "Study Identifier", "Req", "Identifier", "Char"),
                         var("USUBJID", "Unique Subject Identifier", "Req", "Identifier", "Char"),
+                        var("RFSTDTC", "Subject Reference Start Date/Time", "Exp",
+                                "Record Qualifier", "Char"),
                         sex),
                 "One record per subject", null);
+        StoredDataset suppqual = new StoredDataset("SUPPQUAL",
+                "Supplemental Qualifiers for [domain name]", "1", null,
+                List.of(var("STUDYID", "Study Identifier", "Req", "Identifier", "Char"),
+                        var("RDOMAIN", "Related Domain Abbreviation", "Req", "Identifier", "Char"),
+                        var("USUBJID", "Unique Subject Identifier", "Req", "Identifier", "Char"),
+                        var("QNAM", "Qualifier Variable Name", "Req", "Topic", "Char"),
+                        var("QVAL", "Data Value", "Req", "Result Qualifier", "Char")),
+                "One record per IDVAR, IDVARVAL, and QNAM value per subject", null);
         StoredClass events = new StoredClass("Events", "Events", "1", List.of(), List.of(ae), null,
                 List.of(), List.of(), List.of());
+        StoredClass relationship = new StoredClass("Relationship", "Relationship", "4", List.of(),
+                List.of(suppqual), null, List.of(), List.of(), List.of());
         StoredClass trialDesign = new StoredClass("Trial Design", "Trial Design", "2", List.of(),
                 List.of(ts), null, List.of(), List.of(), List.of());
         StoredClass special = new StoredClass("Special Purpose", "Special Purpose", "3", List.of(),
                 List.of(dm), null, List.of(), List.of(), List.of());
         return StoredProduct.builder().key(IG_KEY).name("SDTMIG v3.4").label("SDTMIG v3.4")
                 .version("3.4").modelHref("/mdr/sdtm/2-0")
-                .classes(List.of(events, trialDesign, special)).datasets(List.of())
+                .classes(List.of(events, trialDesign, special, relationship)).datasets(List.of())
                 .dataStructures(List.of()).domains(List.of()).build();
+    }
+
+
+    static StoredProduct adam()
+    {
+        StoredDataStructure adsl = new StoredDataStructure("ADSL", "Subject-Level Analysis Dataset",
+                "1", "SUBJECT LEVEL ANALYSIS DATASET", null, List.of(
+                        new StoredVariableSet("Identifier", "Identifier", "1",
+                                List.of(var("STUDYID", "Study Identifier", "Req", null, "Char"),
+                                        var("USUBJID", "Unique Subject Identifier", "Req", null,
+                                                "Char")),
+                                null),
+                        // the Library's template spelling, never a concrete TRT01P
+                        new StoredVariableSet(
+                                "Treatment", "Treatment", "2", List.of(var("TRTxxP",
+                                        "Planned Treatment for Period xx", "Cond", null, "Char")),
+                                null)),
+                null);
+        StoredDataStructure bds = new StoredDataStructure(
+                "BDS", "Basic Data Structure", "2", "BASIC DATA STRUCTURE", null, List
+                        .of(new StoredVariableSet("Analysis Parameter", "Analysis Parameter", "1",
+                                List.of(var("PARAMCD", "Parameter Code", "Req", null, "Char"),
+                                        var("AVAL", "Analysis Value", "Cond", null, "Num")),
+                                null)),
+                null);
+        return StoredProduct.builder().key(ADAM_KEY).name("ADaMIG v1.3").label("ADaMIG v1.3")
+                .version("1.3").classes(List.of()).datasets(List.of())
+                .dataStructures(List.of(adsl, bds)).domains(List.of()).build();
     }
 
 

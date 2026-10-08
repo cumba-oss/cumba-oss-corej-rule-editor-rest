@@ -49,6 +49,12 @@
             },
             "type" : "array"
           },
+          "joined" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Joined"
+            },
+            "type" : "array"
+          },
           "loaded" : {
             "type" : "boolean"
           },
@@ -823,6 +829,23 @@
           "snippets" : {
             "items" : {
               "$ref" : "#/components/schemas/Snippet"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Joined" : {
+        "properties" : {
+          "joinType" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "variables" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Variable"
             },
             "type" : "array"
           }

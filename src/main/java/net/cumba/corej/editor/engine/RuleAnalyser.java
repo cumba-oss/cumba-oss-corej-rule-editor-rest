@@ -2,10 +2,13 @@ package net.cumba.corej.editor.engine;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
 import net.cumba.corej.authoring.AssembledRule;
 import net.cumba.corej.authoring.AuthoredRuleAssembler;
 import net.cumba.corej.authoring.RuleDiagnostic;
@@ -14,6 +17,7 @@ import net.cumba.corej.authoring.RuleInsight.DerivedFields;
 import net.cumba.corej.authoring.RuleInsight.ScopeEntry;
 import net.cumba.corej.authoring.RuleInsight.ScopeUniverse;
 import net.cumba.corej.core.metadata.store.MetadataStore;
+import net.cumba.corej.core.model.JoinType;
 import net.cumba.corej.core.model.OutputVariableListing;
 import net.cumba.corej.core.model.Rule;
 import net.cumba.corej.core.model.StandardRef;
@@ -51,6 +55,15 @@ import org.springframework.stereotype.Component;
  * Scope and Standards around a trivially valid Check. Only the universe: the diagnostics, derived
  * fields, references and bindings keep describing the real buffer.
  * </p>
+ *
+ * <p>
+ * The {@code joined} datasets (owner, 2026-10-08: {@code DM.RFSTDTC} on an AE rule) are read from
+ * the check's {@code Match_Datasets} as authored — so they survive a check that does not load — and
+ * each one's variables are the concrete names of the engine's universe of a {@link #joinedRule
+ * minimal rule} scoped to exactly that dataset (a supplemental family: {@code SUPPQUAL}), over the
+ * products of the rule's {@code Standards}. That rule depends on the name alone, so the variables
+ * are cached per (products, store name, store generation).
+ * </p>
  */
 @Component
 public class RuleAnalyser
@@ -61,6 +74,17 @@ public class RuleAnalyser
     private final EngineStore store;
 
     private final PackageStandards standards;
+
+    /** The variables of a joined dataset per (products, name, store generation). */
+    private final LruCache<JoinedKey, List<Analysis.Variable>> joinedCache = new LruCache<>(
+            JOINED_CACHE_ENTRIES);
+
+    static final int JOINED_CACHE_ENTRIES = 128;
+
+    /** The cache key of a joined dataset's variables: everything {@link #joinedRule} reads. */
+    record JoinedKey(List<String> products, String name, long generation)
+    {
+    }
 
     public RuleAnalyser(EngineStore aStore, PackageStandards aStandards)
     {
@@ -216,6 +240,10 @@ public class RuleAnalyser
     Analysis toAnalysis(AssembledRule aAssembled, @Nullable JsonNode aCheck,
             @Nullable Rule aInsight, @Nullable Rule aScopeRule)
     {
+        // the generation BEFORE the store: a reopen in between files the new store's variables
+        // under the old generation, which no later reader asks for — the reverse order could
+        // file the old store's under the new one
+        long generation = store.generation();
         // ONE read: the store may open mid-run (StoreSeeding), and the scope and storeAvailable
         // must describe the same store
         MetadataStore open = store.store().orElse(null);
@@ -250,9 +278,177 @@ public class RuleAnalyser
             ScopeUniverse universe = RuleInsight.scopeUniverse(aScopeRule, open, products);
             scope = toScope(open, universe, products);
         }
+        List<Analysis.Joined> joined = new ArrayList<>();
+        for (JoinedEntry entry : joinedEntriesOf(aCheck))
+        {
+            joined.add(new Analysis.Joined(entry.name(), entry.joinType(),
+                    joinedVariables(storeNameOf(entry.name()), open, generation, products)));
+        }
         return new Analysis(aAssembled.coreId(), aAssembled.rule() != null, aAssembled.parked(),
-                diagnostics, derived, scope, refs, bindingsOf(aCheck), requiredVariablesOf(aCheck),
-                open != null);
+                diagnostics, derived, scope, joined, refs, bindingsOf(aCheck),
+                requiredVariablesOf(aCheck), open != null);
+    }
+
+
+    /**
+     * The variables of one joined dataset: the concrete (non-{@code --}) variables of the engine's
+     * universe of {@link #joinedRule} over the rule's products, cached. A class-level {@code --}
+     * entry is left out: the engine resolves {@code AE.--TERM} with the PRIMARY's prefix
+     * ({@code CheckConditionTransformer.resolveTextWildcard}), so it never names the joined
+     * dataset's variable (review H1). Empty without a store, without products, or when the minimal
+     * rule does not load (it always should: only the name varies, and it is a plain identifier).
+     */
+    List<Analysis.Variable> joinedVariables(String aName, @Nullable MetadataStore aStore,
+            long aGeneration, List<String> aProducts)
+    {
+        if (aStore == null || aProducts.isEmpty())
+        {
+            return List.of();
+        }
+        JoinedKey key = new JoinedKey(List.copyOf(aProducts), aName.toUpperCase(Locale.ROOT),
+                aGeneration);
+        synchronized (joinedCache)
+        {
+            List<Analysis.Variable> cached = joinedCache.get(key);
+            if (cached != null)
+            {
+                return cached;
+            }
+        }
+        // computed outside the lock: two racing requests compute the same immutable answer
+        Rule rule = joinedRule(key.name());
+        List<Analysis.Variable> variables = rule == null ? List.of()
+                : VariableCatalogue
+                        .build(aStore, RuleInsight.scopeUniverse(rule, aStore, aProducts)).stream()
+                        .filter(v -> !v.classLevel()).toList();
+        synchronized (joinedCache)
+        {
+            joinedCache.put(key, variables);
+        }
+        return variables;
+    }
+
+    /** A plain dataset name: no {@code --}, {@code &TOKEN&}, glob or regex — an identifier. */
+    private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_]*");
+
+    /** One qualifying {@code Match_Datasets} entry: its name as authored and its join type. */
+    record JoinedEntry(String name, String joinType)
+    {
+    }
+
+    /**
+     * The datasets the check's keyed {@code Match_Datasets} entries join, as authored (first
+     * qualifying spelling of a name wins with its {@code Join_Type}, names compared
+     * case-insensitively, authored order), read from the check's tree so a check that does not load
+     * still has them. An entry qualifies when it has a plain {@link #PLAIN_NAME} and a non-empty
+     * {@code Keys}, and is none of the entries that build no keyed partner of that name: a
+     * {@code Child: true} parent (its columns are the parent's, whatever the name), a
+     * {@code RELREC} relationship. A template name ({@code SUPP--}, {@code &DOM&}) is not plain.
+     */
+    static List<JoinedEntry> joinedEntriesOf(@Nullable JsonNode aCheck)
+    {
+        List<JoinedEntry> out = new ArrayList<>();
+        if (aCheck == null)
+        {
+            return out;
+        }
+        JsonNode entries = aCheck.get("Match_Datasets");
+        if (entries == null || !entries.isArray())
+        {
+            return out;
+        }
+        List<String> seen = new ArrayList<>();
+        for (JsonNode entry : entries)
+        {
+            JoinedEntry joined = joinedEntryOf(entry);
+            if (joined != null && !seen.contains(joined.name().toUpperCase(Locale.ROOT)))
+            {
+                seen.add(joined.name().toUpperCase(Locale.ROOT));
+                out.add(joined);
+            }
+        }
+        return out;
+    }
+
+
+    /** The entry when it is an ordinary keyed join, else {@code null}. */
+    private static @Nullable JoinedEntry joinedEntryOf(JsonNode aEntry)
+    {
+        if (!aEntry.isObject())
+        {
+            return null;
+        }
+        JsonNode nameNode = aEntry.get("Name");
+        JsonNode keys = aEntry.get("Keys");
+        JsonNode child = aEntry.get("Child");
+        if (nameNode == null || !nameNode.isTextual() || keys == null || !keys.isArray()
+                || keys.isEmpty() || (child != null && child.asBoolean(false)))
+        {
+            return null;
+        }
+        String name = nameNode.asText().strip();
+        if (!PLAIN_NAME.matcher(name).matches() || "RELREC".equals(name.toUpperCase(Locale.ROOT)))
+        {
+            return null;
+        }
+        return new JoinedEntry(name, joinTypeOf(aEntry));
+    }
+
+
+    /**
+     * The entry's {@code Join_Type} as the engine reads it: absent or blank is {@code inner} (the
+     * default {@code RulePackageLoader.normalizeJoinTypes} stamps), a value {@link JoinType} knows
+     * (ignoring case, never trimmed) is its lower-case spelling, and anything else — a load error
+     * the diagnostics name — is passed through lower-cased, so it never reads as {@code left}.
+     */
+    static String joinTypeOf(JsonNode aEntry)
+    {
+        JsonNode node = aEntry.get("Join_Type");
+        String raw = node == null || node.isNull() ? null : node.asText();
+        if (raw == null || JoinType.isAbsent(raw))
+        {
+            return JoinType.INNER.getJsonValue();
+        }
+        JoinType known = JoinType.fromJson(raw);
+        return known == null ? raw.toLowerCase(Locale.ROOT) : known.getJsonValue();
+    }
+
+
+    /**
+     * The name the store declares a joined dataset's variables under: {@code SUPPQUAL} for a
+     * supplemental family ({@code SUPP…} / {@code SQ…}, the engine's own prefix test —
+     * {@code JoinKeyTypes}, and {@code MetadataLibraryProvider}'s {@code SUPP--} / {@code SQ--} →
+     * {@code SUPPQUAL}), the name itself otherwise.
+     */
+    static String storeNameOf(String aName)
+    {
+        String upper = aName.toUpperCase(Locale.ROOT);
+        return upper.startsWith("SUPP") || upper.startsWith("SQ") ? SUPPQUAL : aName;
+    }
+
+    /** The IG's one supplemental-qualifier dataset, whose columns every keyed SUPP family has. */
+    static final String SUPPQUAL = "SUPPQUAL";
+
+    /**
+     * The rule whose scope universe is exactly the joined dataset: {@code Scope.Datasets.Include}
+     * of the one name, which the engine matches as a literal (case-insensitive, no prefix) against
+     * a standard's dataset name — and, for an ADaM IG, which names no datasets, against the data
+     * structure's name ({@code ADSL}), the unit {@code RuleInsight.scopeUniverse} judges there. A
+     * placeholder Core, Description, Outcome, a trivially valid Check and an explicit Sensitivity,
+     * so the load depends on the name alone (the cache key); no Standards — the products are given
+     * to {@code scopeUniverse} directly. Loaded through the same {@code AuthoredRuleAssembler} path
+     * as the buffer: the engine's reading of the Scope, never a re-implementation.
+     */
+    static @Nullable Rule joinedRule(String aName)
+    {
+        ObjectNode minimal = JsonNodeFactory.instance.objectNode();
+        minimal.putObject("Core").put("Id", "EDITOR-JOINED").put("Status", "Draft");
+        minimal.put("Description", "joined dataset " + aName);
+        minimal.put("Sensitivity", "Record");
+        minimal.putObject("Scope").putObject("Datasets").putArray("Include").add(aName);
+        minimal.putObject("Check").put("expression", "true");
+        minimal.putObject("Outcome").put("Message", "joined dataset");
+        return AuthoredRuleAssembler.assemble(minimal.toString(), null, List.of()).rule();
     }
 
 
