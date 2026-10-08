@@ -255,8 +255,8 @@ branch declares none): the SPA's engine-version banner compares the two (O13).
 
 ## Building and running
 
-Shaped like `cumba-oss-corej-rest`: Spring Boot BOM 4.1.1 (no parent), Java 25, the full gate stack,
-`ban-oss-twins`. A client leaf — never in `build_order.txt`, nothing consumes it:
+Shaped like `cumba-oss-corej-rest`: Spring Boot BOM 4.1.1 (no parent), Java 25, the full gate stack
+(no `ban-oss-twins`: this twin depends on the `cumba-oss-*` engine). A client leaf — never in `build_order.txt`, nothing consumes it:
 
 ```bash
 mvn -o verify                                            # tests, PMD/SpotBugs reports, javadoc gate
@@ -322,8 +322,8 @@ own. No corpus directory is shipped: the rules come from git, per user.
    `settings.xml` naming a repository that serves them, as the optional build secret
    `maven_settings` (the `Dockerfile`'s header); `workspaces` and `metadata-store` volumes) + `rule-editor-web` (the web repo's nginx;
    `BRAND=<name>` selects its brand, passed through as `${BRAND:-neutral}`).
-   `docker compose up --build` is the whole build (the web repo's `DOCKER.md`); run for real on
-   rootless Podman since 2026-10-08. The metadata store is a FILE in the `metadata-store`
+   `docker compose up --build` is the whole build (the web repo's `DOCKER.md`); the same recipe runs
+   for the internal twin on rootless Podman since 2026-10-08; this image has not been started yet. The metadata store is a FILE in the `metadata-store`
    volume (`metadata-store.zip`, the engine's store format 5) that the service seeds itself on
    the first start (`EDITOR_STORE_SEED_TYPE` `GITHUB_PKL` by default, `EDITOR_STORE_SEED_PKL_TAG`
    `v0.17.1`, `EDITOR_STORE_SEED_API_KEY` for `API`) — see the compose file's header; the run workers' memory is

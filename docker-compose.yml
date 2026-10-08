@@ -76,7 +76,8 @@
 # killed past EDITOR_RUN_TIMEOUT: give the container JAVA_OPTS heap + max-concurrent ×
 # max-heap, or lower the two run settings.
 #
-# Run for real on rootless Podman (podman-compose, WSL2) since 2026-10-08. ⚠ On a WSL2 kernel
+# The same recipe runs for the internal twin on rootless Podman (podman-compose, WSL2) since
+# 2026-10-08; this twin's images have not been started yet. ⚠ On a WSL2 kernel
 # netavark cannot program nftables for the network below ("nft" did not return successfully):
 # switch it to iptables (the web repo's DOCKER.md, step 5b) or run the pod recipe there.
 
