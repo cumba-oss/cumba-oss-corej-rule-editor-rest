@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # CI runtime image for the rule editor's REST service (PLAN-ci-snapshots-and-container-images
 # D5). No Maven: it layers a JRE over the release bundle the workflow's build job already
 # produced, so the Java build runs once and the image carries the same bytes as the release

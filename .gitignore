@@ -61,3 +61,6 @@ __pycache__/
 # The default editor.workspace-root of a local run: per-user clones of the rule
 # repository (and the optional anonymous clone). Runtime state, never committed.
 /workspaces/
+
+# CI's image staging (publish-image job): the release zip unpacked for Dockerfile.runtime.
+/image-ctx/

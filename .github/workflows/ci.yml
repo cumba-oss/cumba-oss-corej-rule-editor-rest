@@ -48,8 +48,10 @@ on:
 # pass is the long pole, so without this two runs compete for a runner.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Never cancel a tag run — it publishes a release. Branch runs supersede.
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # Only a pull_request run is superseded. A push to main publishes (snapshot / image) and a
+  # tag cuts a release: cancelling either mid-publish leaves a half-published state, so
+  # those runs queue instead (review G1).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -338,7 +340,8 @@ jobs:
       # M2): the zip is also the publish-image job's input, so main's image carries the
       # same bytes as its release zip would. The release job still runs on tags only.
       - name: Upload release assets
-        if: github.event_name == 'push'
+        # Also on a workflow_dispatch of a tag ref: the release job needs the zip (review G3).
+        if: ${{ github.event_name == 'push' || startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v7
         with:
           name: release-archives
@@ -395,7 +398,8 @@ jobs:
   # ⚠ Needs the org secrets DOCKERHUB_USERNAME / DOCKERHUB_TOKEN (D8); never runs on a PR.
   publish-image:
     needs: build
-    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}
+    # Fork guard (review G2): a fork has no Docker Hub secrets and must never push.
+    if: ${{ github.repository_owner == 'cumba-oss' && github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -451,12 +455,24 @@ jobs:
           set -euo pipefail
           image="${IMAGE_REGISTRY}/p300/${IMAGE_NAME}"
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            second="latest"
+            # `latest` only for the HIGHEST release tag (review G4): a patch tag cut on an
+            # older line (v0.4.3 after v0.5.0) must not move `latest` backwards. ls-remote
+            # reads the remote's tags; the shallow checkout above holds only this one.
+            tag="${GITHUB_REF#refs/tags/}"
+            highest="$(git ls-remote --tags origin 'v*' | sed -e 's#^.*refs/tags/##' -e 's#\^{}$##' \
+              | grep -E '^v[0-9]+(\.[0-9]+){2,3}$' | sort -uV | tail -1)" \
+              || { echo "::error::could not list the remote's release tags"; exit 1; }
+            if [ "${highest}" = "${tag}" ]; then
+              tags="${image}:${VERSION},${image}:latest"
+            else
+              tags="${image}:${VERSION}"
+              echo "::notice::${tag} is not the highest release tag (${highest}): \`latest\` stays where it is"
+            fi
           else
-            second="sha-${GITHUB_SHA::7}"
+            tags="${image}:${VERSION},${image}:sha-${GITHUB_SHA::7}"
           fi
-          echo "tags=${image}:${VERSION},${image}:${second}" >> "$GITHUB_OUTPUT"
-          echo "Image tags: ${image}:${VERSION} ${image}:${second}"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Image tags: ${tags}"
 
       # An unset secret arrives as the EMPTY string and login-action then fails with a
       # generic message; name the two secrets instead (owner action, D8).
@@ -486,7 +502,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # The base image is Dockerfile.runtime's default (Docker Hub): no build arg, no host.
-      # provenance off, as on Gitea: a plain manifest list, no attestation entries.
+      # provenance off: a plain manifest list, no attestation entries.
       - name: Build and push the image
         uses: docker/build-push-action@v7
         with:
@@ -508,7 +524,11 @@ jobs:
   # each platform's workflow builds and publishes its own.
   release:
     needs: [build, publish-image]
-    if: startsWith(github.ref, 'refs/tags/')
+    # A workflow_dispatch on a tag ref must still cut the release (review G3): publish-image
+    # runs on push only, so there it is SKIPPED, which by default would skip this job too.
+    # A FAILED or cancelled publish-image still blocks the release; !cancelled() keeps a
+    # cancelled run from releasing.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') && needs.build.result == 'success' && (needs.publish-image.result == 'success' || needs.publish-image.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       # Overrides the workflow-level `contents: read`; creating a release writes.
