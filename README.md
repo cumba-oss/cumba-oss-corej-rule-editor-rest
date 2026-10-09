@@ -280,6 +280,62 @@ Chrome and Firefox. A forge without TLS needs `--editor.repository.allow-http=tr
 
 Configuration keys and their meaning: [`src/main/resources/application.yaml`](src/main/resources/application.yaml).
 
+## Building `main`
+
+On `main` the version is a `-SNAPSHOT`, and so is every sibling `cumba-oss-*`
+artifact it depends on. Each sibling publishes its snapshot to the Central
+Portal snapshot repository on every push to its `main`. The poms deliberately
+name no snapshot repository, so a clone that has not built the siblings itself
+needs a settings file that adds it (the same one CI writes):
+
+```xml
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <profiles>
+    <profile>
+      <id>central-portal-snapshots</id>
+      <repositories>
+        <repository>
+          <id>central-portal-snapshots</id>
+          <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+          <releases><enabled>false</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>central-portal-snapshots</activeProfile>
+  </activeProfiles>
+</settings>
+```
+
+```bash
+mvn -gs central-snapshots.xml clean install
+```
+
+`-gs` replaces only the Maven installation's global settings; your
+`~/.m2/settings.xml` still applies. Alternatively install the siblings locally,
+in order: commons → formats → datatable → swingx-msp → corej. A release build
+(a tag) never needs this: it depends on released versions from Maven Central
+only. Central deletes snapshots after 90 days.
+
+## Container image
+
+CI publishes **`docker.io/p300/corej-rule-editor-rest`** to Docker Hub, for linux/amd64 and linux/arm64. The
+`publish-image` job of `.github/workflows/ci.yml` builds [`Dockerfile.runtime`](Dockerfile.runtime)
+from the release zip the build job produced — the zip's bundle (top-level directory stripped) under
+a JRE — so the image carries the release's bytes and no Maven runs inside the image build.
+
+| pushed by      | tags                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| a tag `vX.Y.Z` | `X.Y.Z` and `latest` — `latest` only ever means a release                                        |
+| a push to main | `X.Y.Z-SNAPSHOT`, the pom's `<revision>` (moves with main), and `sha-<short commit>` (immutable) |
+
+The self-building `Dockerfile` and `docker-compose.yml` stay for local builds from the sources
+(the web repo's `DOCKER.md`); the two runtime stages are kept in step.
+
 ## Running the distribution
 
 `mvn package` also assembles the runnable bundle, `target/cumba-oss-corej-rule-editor-rest-<version>.zip`

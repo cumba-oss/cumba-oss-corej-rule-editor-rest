@@ -57,9 +57,10 @@
 # Otherwise the jar is API-only (shape 2) and docker-compose.yml puts the SPA's nginx
 # in front of it.
 #
-# ⚠ Not built in CI (the deployment host is an owner decision, PLAN-rule-editor §8.5), and the
-# sandbox this was written in has no container runtime: the Maven step was run outside a
-# container on a source export, the image build itself is verified on the owner's host.
+# This file is for LOCAL builds from the sources. CI does not build it: it publishes the image
+# docker.io/p300/corej-rule-editor-rest from Dockerfile.runtime instead, which copies the release
+# zip's bundle (PLAN-ci-snapshots-and-container-images; README § Container image). Keep the two
+# runtime stages in step.
 ARG MAVEN_IMAGE=maven:3.9.12-eclipse-temurin-25
 ARG JRE_IMAGE=eclipse-temurin:25-jre
 

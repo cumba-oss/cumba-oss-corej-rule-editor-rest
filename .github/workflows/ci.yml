@@ -19,9 +19,11 @@
 #   3. NO MAVEN MIRROR. Everything resolves from Maven Central. Verified by a
 #      cold build with an empty local repo and no settings.xml: 1030
 #      artifacts, all from `central`.
-#   4. NO SONAR, NO DEPLOY, NO RELEASE. Those target internal hosts. Releases
-#      and Maven Central publishing are deliberately out of scope here and
-#      are being added in later steps.
+#   4. NO SONAR, NO NEXUS DEPLOY. Those target internal hosts. Nothing goes to
+#      Maven Central; a tag cuts the GitHub Release with the distribution zip,
+#      and a tag or a push to main pushes the container image to Docker Hub
+#      (publish-image). Non-tag runs resolve sibling snapshots from Central's
+#      snapshot repository (settings step).
 #
 # Nothing in the pom is CI-specific: `mvn install` with no -P builds the whole
 # reactor, so the commands below match what a developer runs locally.
@@ -93,6 +95,53 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+
+      # ⭐ Sibling -SNAPSHOT artifacts (net.cumba:cumba-oss-*) resolve from the
+      # Central Portal snapshot repository. The poms deliberately name NO
+      # snapshot repository (each forge supplies its own), so this step writes a
+      # settings file and hands it to every later Maven call through MAVEN_ARGS,
+      # which Maven reads from 3.9 on. `-gs` (global settings) MERGES with the
+      # user ~/.m2/settings.xml that setup-java writes for the Central
+      # credentials; nothing is overwritten. It must run before the first `mvn`.
+      # ⚠ An older Maven IGNORES MAVEN_ARGS without a word and resolves no
+      # sibling snapshot, so the step refuses a Maven below 3.9, loudly.
+      # ⚠ Tag runs get neither the file nor the variable: a release resolves
+      # released artifacts only (requireReleaseDeps guards that as well).
+      # This step is byte-identical in every cumba-oss repo; copy it unchanged.
+      - name: Configure Central snapshot repository
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          # Unanchored: a colour code may precede "Apache Maven" on the line.
+          mvn_version="$(mvn -B -v 2>/dev/null | sed -n 's/.*Apache Maven \([0-9][0-9.]*\).*/\1/p' | head -1)" || mvn_version=""
+          IFS=. read -r mvn_major mvn_minor _ <<< "${mvn_version:-0.0}"
+          if (( mvn_major < 3 || (mvn_major == 3 && mvn_minor < 9) )); then
+            echo "::error::Maven '${mvn_version:-?}' (from mvn -v): MAVEN_ARGS needs Maven >= 3.9 (an older one ignores it silently, and no sibling snapshot resolves)." >&2
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/central-snapshots.xml" <<'EOF'
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+            <profiles>
+              <profile>
+                <id>central-portal-snapshots</id>
+                <repositories>
+                  <repository>
+                    <id>central-portal-snapshots</id>
+                    <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+                    <releases><enabled>false</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </repositories>
+              </profile>
+            </profiles>
+            <activeProfiles>
+              <activeProfile>central-portal-snapshots</activeProfile>
+            </activeProfiles>
+          </settings>
+          EOF
+          # Append, never replace: keep any MAVEN_ARGS set before this step.
+          echo "MAVEN_ARGS=${MAVEN_ARGS:+$MAVEN_ARGS }-gs $RUNNER_TEMP/central-snapshots.xml" >> "$GITHUB_ENV"
 
       # Restore at the top; save in a matching step at the end (not
       # setup-java's built-in cache) so a run that downloads new dependencies
@@ -285,8 +334,11 @@ jobs:
       # different version — a bare `*.jar` would attach those to the release
       # alongside the real ones. Measured: a workspace that had built
       # 0.1.0-SNAPSHOT and then 9.9.9 matched 8 jars for 4 modules.
+      # ⭐ On EVERY push, not only tags (PLAN-ci-snapshots-and-container-images D5, review
+      # M2): the zip is also the publish-image job's input, so main's image carries the
+      # same bytes as its release zip would. The release job still runs on tags only.
       - name: Upload release assets
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: release-archives
@@ -332,13 +384,130 @@ jobs:
           path: ~/.pitest-history
           key: ${{ runner.os }}-pitest-${{ github.run_id }}
 
+  # Build + push the container image (PLAN-ci-snapshots-and-container-images phase 3; D5, D7,
+  # D8). Consumes the release zip the build job uploaded, so the build runs once and the image
+  # carries the release's bytes: no Maven or npm inside the image build. Docker Hub,
+  # docker.io/p300/corej-rule-editor-rest, linux/amd64 + linux/arm64 (QEMU for the second).
+  # Tags (D7): a tag vX.Y.Z -> X.Y.Z + latest (`latest` only ever means a release); main ->
+  # the pom's X.Y.Z-SNAPSHOT (moving) + sha-<short commit> (immutable).
+  # Pins track the latest major (BLUEPRINT pin policy for GitHub); the Gitea workflow builds
+  # no image at all (D9), so there is no second file to keep in step.
+  # ⚠ Needs the org secrets DOCKERHUB_USERNAME / DOCKERHUB_TOKEN (D8); never runs on a PR.
+  publish-image:
+    needs: build
+    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      IMAGE_REGISTRY: docker.io
+      IMAGE_NAME: corej-rule-editor-rest
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download release archives
+        uses: actions/download-artifact@v8
+        with:
+          name: release-archives
+          path: release-archives
+
+      # Unpack the release zip into image-ctx/<name>/, the path Dockerfile.runtime COPYs.
+      # unzip keeps the modes the assembly set; python3's zipfile drops them, which is why
+      # Dockerfile.runtime chmods what must be executable anyway. Never `jar xf`.
+      - name: Stage the image context
+        run: |
+          set -euo pipefail
+          # download-artifact may keep the files' target/ path (measured on this forge too,
+          # see the release job's flatten step): find the zip, and require exactly one at
+          # this version.
+          mapfile -t zips < <(find release-archives -type f -name "*-${VERSION}.zip")
+          [ "${#zips[@]}" -eq 1 ] || { echo "::error::expected ONE *-${VERSION}.zip in the artifact, found ${#zips[@]}: ${zips[*]:-}"; exit 1; }
+          rm -rf image-ctx/stage "image-ctx/${IMAGE_NAME}"
+          mkdir -p image-ctx/stage
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -q "${zips[0]}" -d image-ctx/stage
+          elif command -v python3 >/dev/null 2>&1; then
+            python3 -m zipfile -e "${zips[0]}" image-ctx/stage
+          else
+            echo "::error::neither unzip nor python3 on the runner"; exit 1
+          fi
+          # The REST zip holds ONE top-level directory, cumba-oss-corej-rule-editor-rest-<version>/ — strip it.
+          top="image-ctx/stage/cumba-oss-corej-rule-editor-rest-${VERSION}"
+          [ -d "$top" ] || { echo "::error::$top missing: the zip's top-level directory changed"; ls -la image-ctx/stage; exit 1; }
+          mv "$top" "image-ctx/${IMAGE_NAME}"
+          rm -rf image-ctx/stage
+          ls -la "image-ctx/${IMAGE_NAME}"
+
+      # D7: a tag -> X.Y.Z + latest; main -> the build's X.Y.Z-SNAPSHOT + sha-<short>.
+      - name: Image tags
+        id: tags
+        run: |
+          set -euo pipefail
+          image="${IMAGE_REGISTRY}/p300/${IMAGE_NAME}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            second="latest"
+          else
+            second="sha-${GITHUB_SHA::7}"
+          fi
+          echo "tags=${image}:${VERSION},${image}:${second}" >> "$GITHUB_OUTPUT"
+          echo "Image tags: ${image}:${VERSION} ${image}:${second}"
+
+      # An unset secret arrives as the EMPTY string and login-action then fails with a
+      # generic message; name the two secrets instead (owner action, D8).
+      - name: Check the Docker Hub secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+              echo "::error::the DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets are empty or unset" \
+                   "(org cumba-oss). Refusing to build an image that cannot be pushed." >&2
+              exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # QEMU emulates arm64 for the RUN steps of the second platform.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The base image is Dockerfile.runtime's default (Docker Hub): no build arg, no host.
+      # provenance off, as on Gitea: a plain manifest list, no attestation entries.
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ${{ steps.tags.outputs.tags }}
+
   #
   # This is the PUBLIC release. The Gitea workflow cuts its own release for the
   # same tag from the same jars, and additionally deploys to the internal Nexus.
   # The two are independent: releases are not git refs, so nothing syncs them —
   # each platform's workflow builds and publishes its own.
   release:
-    needs: build
+    needs: [build, publish-image]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:

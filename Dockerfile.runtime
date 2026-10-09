@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+#
+# CI runtime image for the rule editor's REST service (PLAN-ci-snapshots-and-container-images
+# D5). No Maven: it layers a JRE over the release bundle the workflow's build job already
+# produced, so the Java build runs once and the image carries the same bytes as the release
+# zip — no snapshot resolution and no Maven settings secret inside `docker build`.
+#
+# Context is THIS REPOSITORY. The build job uploads
+# target/cumba-oss-corej-rule-editor-rest-<version>.zip (the release zip, on every push); the
+# publish-image job of .github/workflows/ci.yml unzips it and strips the zip's single
+# top-level cumba-oss-corej-rule-editor-rest-<version>/ directory into
+# image-ctx/corej-rule-editor-rest/ (target/ is excluded by .dockerignore, image-ctx/
+# deliberately is not). By hand, from a built tree:
+#
+#   mkdir -p image-ctx && rm -rf image-ctx/corej-rule-editor-rest
+#   cp -a target/cumba-oss-corej-rule-editor-rest-<v>/cumba-oss-corej-rule-editor-rest-<v> \
+#         image-ctx/corej-rule-editor-rest
+#   docker build -f Dockerfile.runtime -t corej-rule-editor-rest:local .
+#
+# Published as docker.io/p300/corej-rule-editor-rest (README § Container image). The base
+# image is the build arg RUNTIME_IMAGE; CI keeps the default, Docker Hub's eclipse-temurin:25-jre.
+# The bundle is API-only (shape 2): the SPA is its own image, corej-rule-editor-web.
+#
+# Everything below the COPY is the self-building Dockerfile's runtime stage — keep the two in
+# step; the comments that explain it live there.
+ARG RUNTIME_IMAGE=eclipse-temurin:25-jre
+FROM ${RUNTIME_IMAGE}
+
+COPY image-ctx/corej-rule-editor-rest/ /opt/rule-editor/
+
+# A non-root user owns the workspaces and nothing else; the hooks directory every clone's
+# core.hooksPath names is root-owned and read-only (security review L4). The chmod of run.sh
+# is load-bearing: an unzip that drops modes (python3 -m zipfile, jar xf) leaves it 0644.
+RUN useradd --system --create-home --home-dir /var/lib/rule-editor rule-editor \
+    && mkdir -p /var/lib/rule-editor/workspaces /var/lib/rule-editor/metadata-store \
+    && chown -R rule-editor:rule-editor /var/lib/rule-editor \
+    && chmod 755 /opt/rule-editor/run.sh \
+    && mkdir -p /etc/rule-editor \
+    && mkdir -p /opt/rule-editor/hooks-disabled \
+    && chown root:root /opt/rule-editor/hooks-disabled \
+    && chmod 0555 /opt/rule-editor/hooks-disabled
+USER rule-editor
+WORKDIR /var/lib/rule-editor
+
+# /etc/rule-editor must EXIST even when nothing is mounted (the launcher names it without
+# `optional:`); the metadata store is a FILE in its own volume (CDISC_METADATA_STORE).
+ENV COREJ_CONFIG_DIR=/etc/rule-editor
+VOLUME ["/var/lib/rule-editor/workspaces", "/var/lib/rule-editor/metadata-store"]
+EXPOSE 8081
+
+ENTRYPOINT ["/opt/rule-editor/run.sh"]
+# The session cookie stays Secure (security review M3): serve through a TLS-terminating proxy;
+# --server.servlet.session.cookie.secure=false is a throw-away-trial opt-out only.
+CMD ["--editor.workspace-root=/var/lib/rule-editor/workspaces", "--editor.workspace.hooks-dir=/opt/rule-editor/hooks-disabled"]
