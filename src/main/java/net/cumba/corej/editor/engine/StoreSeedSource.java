@@ -55,12 +55,17 @@ public interface StoreSeedSource
      * @param warnings
      *            the seeder's content warnings, fetch failures excluded (logged; they do not fail
      *            the seed)
+     * @param details
+     *            the seeder's per-entry detail lines ({@code StoreSeedReport.details()}: a stale
+     *            erratum, a seed supplement IGNORED or REPLACING a copy the seed did not carry, a
+     *            footnote-marker label) — logged, never a warning; empty on a conforming seed
      * @param sourceRef
      *            where the content came from (e.g. the repository at the tag and its commit), or
      *            null
      */
     record Outcome(String summary, int products, int ctPackages, List<String> ctPackagesMissed,
-            List<String> fetchFailures, List<String> warnings, @Nullable String sourceRef)
+            List<String> fetchFailures, List<String> warnings, List<String> details,
+            @Nullable String sourceRef)
     {
 
         public Outcome
@@ -68,14 +73,16 @@ public interface StoreSeedSource
             ctPackagesMissed = List.copyOf(ctPackagesMissed);
             fetchFailures = List.copyOf(fetchFailures);
             warnings = List.copyOf(warnings);
+            details = List.copyOf(details);
         }
 
 
-        /** A complete outcome: nothing missed, no fetch failed. */
+        /** A complete outcome: nothing missed, no fetch failed, no detail lines. */
         public Outcome(String aSummary, int aProducts, int aCtPackages, List<String> aWarnings,
                 @Nullable String aSourceRef)
         {
-            this(aSummary, aProducts, aCtPackages, List.of(), List.of(), aWarnings, aSourceRef);
+            this(aSummary, aProducts, aCtPackages, List.of(), List.of(), aWarnings, List.of(),
+                    aSourceRef);
         }
 
 

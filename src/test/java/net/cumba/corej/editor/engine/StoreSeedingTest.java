@@ -43,6 +43,12 @@ class StoreSeedingTest
 
     static final String KEY = "s3cr3t-API-KEY-0815";
 
+    /** A seed supplement REPLACED line, as {@code StoreSeedReport.details()} words it. */
+    static final String DETAIL = "seed supplement REPLACED the existing store's copy:"
+            + " standards/sendig/dart-1-2: its source-served copy was corrected under another"
+            + " errata register and is not carried - the E14 owner 2026-10-07 seed supplement"
+            + " replaces it";
+
     /** A source writing the fixture store; optionally blocking until released, counting calls. */
     static class FakeSource implements StoreSeedSource
     {
@@ -503,7 +509,7 @@ class StoreSeedingTest
         {
             TestStore.write(aStaging, "seed " + aCalls.incrementAndGet());
             return new StoreSeedSource.Outcome("partial", 2, 1, List.of("CT-MISSED"), aFailures,
-                    List.of("a content warning"), "fake");
+                    List.of("a content warning"), List.of(), "fake");
         };
     }
 
@@ -573,6 +579,44 @@ class StoreSeedingTest
     }
 
 
+    /**
+     * PLAN-seed-sendig-dart-1-2 confirmation look L-c: a seed's detail lines — where a seed
+     * supplement that REPLACED a copy is reported, never in the summary or as a warning — reach the
+     * editor's log, as the CLI, the REST service and the desktop print them.
+     */
+    @Test
+    void theSeedsDetailLinesAreLogged(@TempDir Path aDir) throws Exception
+    {
+        Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        root.addAppender(appender);
+        try
+        {
+            StoreSeedSource detailed = (aRequest, aStaging) ->
+            {
+                TestStore.write(aStaging, "seeded with a detail");
+                return new StoreSeedSource.Outcome("2 products", 2, 1, List.of(), List.of(),
+                        List.of(), List.of(DETAIL), "fake");
+            };
+            try (EngineStore store = new EngineStore(aDir.resolve("metadata-store.zip")))
+            {
+                await(new StoreSeeding(store, props(SeedType.GITHUB_PKL, "v0.17.1"), detailed)
+                        .start());
+                assertEquals("seeded with a detail", provenance(store));
+            }
+            assertTrue(
+                    appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                            .anyMatch(("metadata store seed detail: " + DETAIL)::equals),
+                    "the REPLACED line is logged");
+        }
+        finally
+        {
+            root.detachAppender(appender);
+        }
+    }
+
+
     /** The engine reports fetch failures as text: the two wordings, and content warnings apart. */
     @Test
     void fetchFailuresAreToldApartFromContentWarnings()
@@ -587,10 +631,12 @@ class StoreSeedingTest
                         "SDTMIG 3.4: /mdr/sdtmig/3-4 projected with no classes, datasets or data"
                                 + " structures - the source may not have served the expanded"
                                 + " document"),
-                null);
+                List.of(DETAIL), null);
         assertEquals(2, o.fetchFailures().size(), o.fetchFailures().toString());
         assertEquals(3, o.warnings().size());
         assertEquals(List.of("CT-1"), o.ctPackagesMissed());
+        assertEquals(List.of(DETAIL), o.details(),
+                "L-c: the detail lines pass through, apart from the warnings");
         assertFalse(o.complete());
         assertTrue(new StoreSeedSource.Outcome("s", 1, 1, List.of("w"), null).complete());
     }

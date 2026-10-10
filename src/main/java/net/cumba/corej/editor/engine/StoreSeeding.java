@@ -581,6 +581,10 @@ public class StoreSeeding
         {
             LOG.warn("metadata store seed FETCH failed: {}", scrub(failure, aTarget));
         }
+        for (String detail : aOutcome.details())
+        {
+            LOG.info("metadata store seed detail: {}", scrub(detail, aTarget));
+        }
     }
 
 

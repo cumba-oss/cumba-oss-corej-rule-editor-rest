@@ -109,7 +109,8 @@ public class EngineStoreSeedSource implements StoreSeedSource
             }
             return outcome(report.summary(), report.productsSeeded() + report.productsCarried(),
                     report.ctPackagesFetched() + report.ctPackagesCarried(),
-                    report.ctPackagesMissed(), report.warnings(), report.sourceRef());
+                    report.ctPackagesMissed(), report.warnings(), report.details(),
+                    report.sourceRef());
         }
         finally
         {
@@ -120,10 +121,12 @@ public class EngineStoreSeedSource implements StoreSeedSource
 
     /**
      * The outcome of an engine seed, its warnings split into FETCH failures (the source failed to
-     * deliver: the store is incomplete, MED-1) and content warnings.
+     * deliver: the store is incomplete, MED-1) and content warnings; its detail lines passed
+     * through (PLAN-seed-sendig-dart-1-2 confirmation look L-c: a seed supplement that REPLACED a
+     * copy is reported only there, never in the summary or as a warning).
      */
     static Outcome outcome(String aSummary, int aProducts, int aCtPackages, List<String> aMissed,
-            List<String> aWarnings, @Nullable String aSourceRef)
+            List<String> aWarnings, List<String> aDetails, @Nullable String aSourceRef)
     {
         List<String> failures = new ArrayList<>();
         List<String> content = new ArrayList<>();
@@ -131,7 +134,7 @@ public class EngineStoreSeedSource implements StoreSeedSource
         {
             (isFetchFailure(w) ? failures : content).add(w);
         }
-        return new Outcome(aSummary, aProducts, aCtPackages, aMissed, failures, content,
+        return new Outcome(aSummary, aProducts, aCtPackages, aMissed, failures, content, aDetails,
                 aSourceRef);
     }
 
