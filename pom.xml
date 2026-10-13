@@ -127,7 +127,7 @@
             JGit: the workspaces are clones, every git operation goes through it
             (PLAN-rule-editor section 5.1.5, 5.2, 5.8.3). Not managed by the Boot BOM.
         -->
-        <dependency.jgit.version>7.7.1.202607240634-r</dependency.jgit.version>
+        <dependency.jgit.version>7.8.0.202609011348-r</dependency.jgit.version>
         <dependency.junit.jupiter.version>6.1.3</dependency.junit.jupiter.version>
 
         <!--
@@ -139,7 +139,7 @@
         <plugin.central-publishing-maven-plugin.version>0.11.0</plugin.central-publishing-maven-plugin.version>
         <central.skipPublishing>false</central.skipPublishing>
 
-        <dependency.plexus-compiler.version>2.17.0</dependency.plexus-compiler.version>
+        <dependency.plexus-compiler.version>2.17.1</dependency.plexus-compiler.version>
 
         <!-- Error Prone - consumed by the ErrPrn profile, active by default. -->
         <dependency.error-prone.version>2.50.0</dependency.error-prone.version>
@@ -150,10 +150,10 @@
              profile (active unless -Dnullaway.disabled) fills nullaway.extraArgs;
              jspecify supplies the @Nullable / @NonNull / @NullMarked annotations. -->
         <dependency.jspecify.version>1.0.1</dependency.jspecify.version>
-        <dependency.nullaway.version>0.14.1</dependency.nullaway.version>
-        <dependency.annotator-scanner.version>1.3.17</dependency.annotator-scanner.version>
+        <dependency.nullaway.version>0.14.2</dependency.nullaway.version>
+        <dependency.annotator-scanner.version>1.3.19</dependency.annotator-scanner.version>
 
-        <plugin.exec-maven-plugin.version>3.6.3</plugin.exec-maven-plugin.version>
+        <plugin.exec-maven-plugin.version>3.6.4</plugin.exec-maven-plugin.version>
         <plugin.git-commit-id-maven-plugin.version>10.0.1</plugin.git-commit-id-maven-plugin.version>
         <plugin.license-maven-plugin.version>2.7.1</plugin.license-maven-plugin.version>
         <plugin.maven-compiler-plugin.version>3.16.0</plugin.maven-compiler-plugin.version>
@@ -161,18 +161,22 @@
         <plugin.maven-assembly-plugin.version>3.8.0</plugin.maven-assembly-plugin.version>
         <plugin.maven-jar-plugin.version>3.5.1</plugin.maven-jar-plugin.version>
         <plugin.maven-clean-plugin.version>3.5.0</plugin.maven-clean-plugin.version>
-        <plugin.maven-install-plugin.version>3.1.4</plugin.maven-install-plugin.version>
-        <plugin.maven-deploy-plugin.version>3.1.4</plugin.maven-deploy-plugin.version>
+        <plugin.maven-install-plugin.version>3.2.0</plugin.maven-install-plugin.version>
+        <plugin.maven-deploy-plugin.version>3.2.0</plugin.maven-deploy-plugin.version>
+        <plugin.flatten-maven-plugin.version>1.8.0</plugin.flatten-maven-plugin.version>
+        <plugin.properties-maven-plugin.version>1.3.1</plugin.properties-maven-plugin.version>
+        <plugin.sonar-maven-plugin.version>5.8.0.7211</plugin.sonar-maven-plugin.version>
+        <plugin.versions-maven-plugin.version>2.23.0</plugin.versions-maven-plugin.version>
         <plugin.maven-source-plugin.version>3.4.0</plugin.maven-source-plugin.version>
         <plugin.maven-javadoc-plugin.version>3.12.0</plugin.maven-javadoc-plugin.version>
         <plugin.maven-pmd-plugin.version>3.28.0</plugin.maven-pmd-plugin.version>
-        <pmd.tool.version>7.27.0</pmd.tool.version>
+        <pmd.tool.version>7.28.0</pmd.tool.version>
         <plugin.maven-project-info-reports-plugin.version>3.9.0</plugin.maven-project-info-reports-plugin.version>
         <plugin.maven-resources-plugin.version>3.5.0</plugin.maven-resources-plugin.version>
         <plugin.maven-site-plugin.version>3.22.0</plugin.maven-site-plugin.version>
         <plugin.maven-surefire-plugin.version>3.6.0</plugin.maven-surefire-plugin.version>
-        <plugin.spotbugs-maven-plugin.version>4.10.4.1</plugin.spotbugs-maven-plugin.version>
-        <plugin.spotless-maven-plugin.version>3.10.2</plugin.spotless-maven-plugin.version>
+        <plugin.spotbugs-maven-plugin.version>4.10.5.0</plugin.spotbugs-maven-plugin.version>
+        <plugin.spotless-maven-plugin.version>3.10.4</plugin.spotless-maven-plugin.version>
         <plugin.jacoco-maven-plugin.version>0.8.15</plugin.jacoco-maven-plugin.version>
         <plugin.maven-enforcer-plugin.version>3.6.3</plugin.maven-enforcer-plugin.version>
         <plugin.pitest-maven-plugin.version>1.30.0</plugin.pitest-maven-plugin.version>
@@ -1724,7 +1728,7 @@
                 <plugin>
                   <groupId>org.codehaus.mojo</groupId>
                   <artifactId>versions-maven-plugin</artifactId>
-                  <version>2.21.0</version>
+                  <version>${plugin.versions-maven-plugin.version}</version>
                   <configuration>
                     <ignoredVersions>(?i).*-(alpha|beta|m|rc)([-.]?\d+)?</ignoredVersions>
                   </configuration>
@@ -1997,7 +2001,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>properties-maven-plugin</artifactId>
-                <version>1.2.1</version>
+                <version>${plugin.properties-maven-plugin.version}</version>
                 <inherited>false</inherited>
                 <executions>
                     <execution>
@@ -2016,13 +2020,13 @@
             <plugin>
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>
-                <version>5.6.0.6792</version>
+                <version>${plugin.sonar-maven-plugin.version}</version>
             </plugin>
 
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>flatten-maven-plugin</artifactId>
-                <version>1.7.3</version>
+                <version>${plugin.flatten-maven-plugin.version}</version>
                 <configuration>
                     <updatePomFile>true</updatePomFile>
                     <flattenMode>resolveCiFriendliesOnly</flattenMode>
