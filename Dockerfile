@@ -61,7 +61,7 @@
 # docker.io/p300/corej-rule-editor-rest from Dockerfile.runtime instead, which copies the release
 # zip's bundle (PLAN-ci-snapshots-and-container-images; README § Container image). Keep the two
 # runtime stages in step.
-ARG MAVEN_IMAGE=maven:3.9.12-eclipse-temurin-25
+ARG MAVEN_IMAGE=maven:3.10.0-eclipse-temurin-25
 ARG JRE_IMAGE=eclipse-temurin:25-jre
 
 FROM ${MAVEN_IMAGE} AS build

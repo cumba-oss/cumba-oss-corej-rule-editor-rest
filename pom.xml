@@ -47,7 +47,7 @@
         <java.version>25</java.version>
         <general.encoding>UTF-8</general.encoding>
 
-        <!-- project.basedir requires 3.9.12+ -->
+        <!-- 3.10.0: the stack is gated on it (dependency refresh 2026-10); project.basedir in profile activation alone needs 3.9.12+ -->
         <maven.version>3.10.0</maven.version>
         <!-- revision should be set externally; this is just a fallback -->
         <revision>0.1.0-SNAPSHOT</revision>
