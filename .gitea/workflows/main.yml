@@ -40,7 +40,7 @@ jobs:
       # pull with a confusing error. `container.image` is evaluated before the
       # job starts, so no step can guard it and no `env:` value can feed it
       # (the `env` context is not available here) — the variable MUST exist.
-      image: ${{ vars.DOCKER_REGISTRY_HOSTNAME }}/maven-with-nodejs:3.9-eclipse-temurin-25
+      image: ${{ vars.DOCKER_REGISTRY_HOSTNAME }}/maven-with-nodejs:3.10-eclipse-temurin-25
     # Force bash with -eo pipefail so `mvn ... | tee` propagates failures.
     # Without this, act_runner's implicit shell drops pipefail and a failed
     # Maven build returns tee's exit code (0), silently passing the step.
@@ -546,7 +546,7 @@ jobs:
       # The JS actions below (download-artifact, gitea-release-action) need a
       # node runtime; the bare runner host has none. Reuse the node-bearing
       # build image — heavier than needed, but already pullable, no new dep.
-      image: ${{ vars.DOCKER_REGISTRY_HOSTNAME }}/maven-with-nodejs:3.9-eclipse-temurin-25
+      image: ${{ vars.DOCKER_REGISTRY_HOSTNAME }}/maven-with-nodejs:3.10-eclipse-temurin-25
     # ⛔ bash, EXPLICITLY. Gitea's act_runner defaults a job's steps to `sh -e`, which is
     # dash — it has no `pipefail` and no `shopt`, both of which the signing steps below
     # use. GitHub defaults to bash, so this divergence is invisible in the .github file
