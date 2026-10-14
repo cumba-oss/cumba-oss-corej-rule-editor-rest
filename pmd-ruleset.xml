@@ -125,7 +125,14 @@
     <rule ref="category/java/multithreading.xml/AvoidThreadGroup" />
     <rule ref="category/java/multithreading.xml/DontCallThreadRun" />
     <rule ref="category/java/multithreading.xml/DoubleCheckedLocking" />
+    <!-- NonThreadSafeSingleton is DISABLED. PMD 7.28.0 crashes in
+         NonThreadSafeSingleton.shouldConsiderField (NoSuchElementException: Empty node stream) on a
+         `!= null` check of a record component inside a record method, and the crash fails the module.
+         The rule reported no violation anywhere in the stack before the bump, so disabling it loses
+         no current finding, only detection in new code. Re-enable (restore the line below) with the
+         first PMD release that fixes the crash; databrowser-meta .claude/docs/build-gates.md names it.
     <rule ref="category/java/multithreading.xml/NonThreadSafeSingleton" />
+    -->
     <rule ref="category/java/multithreading.xml/UnsynchronizedStaticFormatter" />
 
     <rule ref="category/java/performance.xml/AddEmptyString" />
