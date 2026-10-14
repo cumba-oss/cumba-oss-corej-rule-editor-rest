@@ -33,11 +33,10 @@
                 implementation of the JSpecify spec."
 
              This project completed a project-wide JSpecify rollout, so 4.10 suddenly sees
-             thousands of @Nullable annotations it previously ignored: the count went from 0
-             under 4.9.8.3 to 313 under 4.10.4.0, across 17 modules. The flagged methods are
-             overwhelmingly Lombok-generated @Nullable getters on the tolerant-wire-format
-             CDISC rule model (CheckConditionLeaf.getValue, Rule.getCore, Operation.getName,
-             RulePackage.getRules, … 100 distinct methods).
+             thousands of @Nullable annotations it previously ignored: 4.10 reports this
+             pattern on code that 4.9 never flagged, across most modules. The flagged methods
+             are overwhelmingly Lombok-generated @Nullable getters on the tolerant-wire-format
+             CDISC rule model (CheckConditionLeaf.getValue, Rule.getCore, …).
 
              NullAway already enforces exactly this contract with a COMPLETE JSpecify
              implementation, and more strictly than SpotBugs is being asked to: the NullAway
