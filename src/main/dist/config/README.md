@@ -21,8 +21,11 @@ applies its `[properties]` with an unconditional `System.setProperty` and overwr
 What belongs here: the bound repository and forge (`editor.repository.url`, `editor.forge.*`),
 the workspace root, the port, the session cookie's `domain` (sibling subdomains), the CORS
 allow-list (`editor.cors.allowed-origins`) and the reverse proxies whose `X-Forwarded-For` the
-per-client limits believe (`editor.trusted-proxies`). The packaged `application.yaml` documents
-every key.
+per-client limits believe and whose `X-Forwarded-Proto` / `-Host` / `-Port` the CORS check believes
+(`editor.trusted-proxies`). ⚠ This bundle with its SPA behind a TLS-terminating proxy: list that
+proxy there, or every login and save is refused `403 Invalid CORS request`; the proxy must
+overwrite `X-Forwarded-Proto`, keep `Host` (or set `X-Forwarded-Host`) and drop a client's
+`X-Forwarded-Host` / `-Port`. The packaged `application.yaml` documents every key.
 
 **`brands/`** — with the SPA bundled into the jar (`-Pbundle-web`), a brand of your own is a
 folder `brands/<name>/` here (a `brand.css` with the design tokens, an optional `brand.json` for a

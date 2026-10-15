@@ -1,8 +1,10 @@
 package net.cumba.corej.editor.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -74,5 +76,23 @@ class ClientAddressTest
         assertThrows(IllegalArgumentException.class, () -> ClientAddress.block("10.0.0.0/33"));
         assertThrows(IllegalArgumentException.class, () -> ClientAddress.block("10.0.0.0/x"));
         assertNull(ClientAddress.literal("localhost"), "a name is never looked up");
+    }
+
+
+    @Test
+    void theTrustedPeerIsTheTcpPeerInTheList()
+    {
+        ClientAddress c = new ClientAddress(List.of("192.0.2.0/24"));
+        MockHttpServletRequest proxy = new MockHttpServletRequest();
+        proxy.setRemoteAddr("192.0.2.10");
+        assertTrue(c.trustedPeer(proxy));
+        MockHttpServletRequest stranger = new MockHttpServletRequest();
+        stranger.setRemoteAddr("198.51.100.7");
+        stranger.addHeader(ClientAddress.FORWARDED_FOR, "192.0.2.10");
+        assertFalse(c.trustedPeer(stranger), "the forwarded chain never makes a peer trusted");
+        MockHttpServletRequest named = new MockHttpServletRequest();
+        named.setRemoteAddr("proxy.example.org");
+        assertFalse(c.trustedPeer(named), "only an IP literal");
+        assertFalse(new ClientAddress(List.of()).trustedPeer(proxy), "an empty list trusts none");
     }
 }

@@ -35,7 +35,13 @@
 #    # are same-origin and need nothing here. A cross-SITE origin cannot work (§4.2).
 #    allowed-origins:
 #      - https://rule-editor.example.org
-#  # Behind a reverse proxy: its address (or CIDR block), so the per-client limits
-#  # (logins, anonymous runs and searches) count the client, not the proxy.
+#  # Behind a reverse proxy: the address (or CIDR block) of the proxy that talks to
+#  # this service. Its X-Forwarded-For makes the per-client limits (logins, anonymous
+#  # runs and searches) count the client, not the proxy; its X-Forwarded-Proto/-Host/
+#  # -Port tell the CORS check the browser's https origin. ⚠ With the SPA bundled into
+#  # this jar behind a TLS-terminating proxy, list THAT proxy here, or every login and
+#  # save is refused 403 "Invalid CORS request". The proxy must overwrite
+#  # X-Forwarded-Proto, keep Host (or set X-Forwarded-Host) and drop a client's
+#  # X-Forwarded-Host / -Port.
 #  trusted-proxies:
 #    - 10.0.0.5

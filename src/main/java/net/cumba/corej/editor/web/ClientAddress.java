@@ -25,6 +25,7 @@ import org.springframework.stereotype.Component;
  * <li>only IP literals are read ({@code InetAddress.ofLiteral}): a forwarded name never causes a
  * DNS lookup.</li>
  * </ul>
+ * The same trust list gates the forwarded scheme, host and port ({@link #trustedPeer}).
  */
 @Component
 public final class ClientAddress
@@ -164,6 +165,18 @@ public final class ClientAddress
             }
         }
         return false;
+    }
+
+
+    /**
+     * Whether the request's TCP peer is one of {@code editor.trusted-proxies} — the gate of the
+     * forwarded scheme, host and port ({@code TrustedForwardedHeadersFilter}), as it is of the
+     * {@code X-Forwarded-For} hop walk here. A peer that is no IP literal is never trusted.
+     */
+    public boolean trustedPeer(HttpServletRequest aRequest)
+    {
+        InetAddress peer = literal(aRequest.getRemoteAddr());
+        return peer != null && trusted(peer);
     }
 
 

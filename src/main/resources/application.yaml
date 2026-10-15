@@ -9,6 +9,14 @@ spring:
 
 server:
   port: 8081
+  # PINNED: the forwarded scheme / host / port are believed only from editor.trusted-proxies, by
+  # the editor's own TrustedForwardedHeadersFilter (PLAN-rule-editor-forwarded-headers). Unset,
+  # Boot turns Tomcat's RemoteIpValve on by itself on a detected cloud platform (Kubernetes,
+  # Cloud Foundry, Heroku, Azure App Service): a second, unconfigured trust path believing every
+  # private range, which also consumes X-Forwarded-For before the per-client limits read it.
+  # ⛔ Never `framework` (Spring's ForwardedHeaderFilter makes the client's own left-most
+  # X-Forwarded-For claim the remote address: a fresh rate-limit key per request) nor `native`.
+  forward-headers-strategy: none
   servlet:
     session:
       # PLAN-rule-editor §5.1.4 (review L1): the forge token lives only in the server-side session.
@@ -90,10 +98,19 @@ editor:
     # answered. ⛔ A cross-SITE deployment is not supported (SameSite=Lax cookie, session-bound
     # CSRF token).
     allowed-origins: []
-  # The reverse proxies (addresses or CIDR blocks) whose X-Forwarded-For is believed when a
-  # per-client limit keys a request — logins, anonymous runs and searches (security review M4):
-  # the right-most forwarded hop that is not one of them is the client; an IPv6 client counts by
-  # its /64. Empty: the TCP peer is the client, so behind a proxy every client shares one key.
+  # The reverse proxies (addresses or CIDR blocks) this service believes forwarding headers from:
+  # - X-Forwarded-For, when a per-client limit keys a request — logins, anonymous runs and
+  #   searches (security review M4): the right-most forwarded hop that is not one of them is the
+  #   client; an IPv6 client counts by its /64. Empty: the TCP peer is the client, so behind a
+  #   proxy every client shares one key.
+  # - X-Forwarded-Proto / -Host / -Port: the scheme, host and port the BROWSER used, which the
+  #   CORS check compares with its Origin. Behind a TLS-terminating proxy (Origin https://…, plain
+  #   HTTP to this service) every login and save is refused 403 "Invalid CORS request" unless the
+  #   peer handing the request on is listed here: the SPA's nginx in the two-apps shape, the TLS
+  #   proxy itself with the SPA bundled into this jar. Forwarded, X-Forwarded-Prefix and
+  #   X-Forwarded-Ssl are never read. That proxy must OVERWRITE X-Forwarded-Proto, keep Host (or
+  #   set X-Forwarded-Host) and DROP a client's X-Forwarded-Host / -Port: what it passes on is
+  #   believed.
   # Trust only the proxies' own addresses: a client inside a trusted block cannot be told from a
   # proxy and could forge X-Forwarded-For for a fresh key per request. docker-compose.yml pins
   # its network's subnet and trusts exactly that block.

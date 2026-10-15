@@ -103,7 +103,8 @@ itself off when the probe fails.
   `editor.anonymous.searches-per-minute` with at most `max-search-results` hits. A *client* is the
   TCP peer, or — behind one of `editor.trusted-proxies` — the right-most untrusted
   `X-Forwarded-For` hop; IPv6 counts by its `/64`. Trust only the proxies' own addresses: a
-  client inside a trusted block cannot be told from a proxy.
+  client inside a trusted block cannot be told from a proxy. The same list gates the forwarded scheme, host and port
+  (§"Session and CSRF"); `X-Forwarded-For` and the remote address are never rewritten by it.
 - **No server path in an answer** — an I/O failure answers a generic text, a 5xx message has the
   workspace root replaced by `<workspaces>`, the store's reason names its file only.
 
@@ -122,6 +123,27 @@ through a TLS-terminating proxy (which also sets HSTS). Plain HTTP to anything b
 **not supported** — Chrome and Firefox send a `Secure` cookie to `http://localhost`, so a local
 developer run works as it is. Trial opt-out ONLY, for a throw-away instance:
 `--server.servlet.session.cookie.secure=false` (compose: `COOKIE_SECURE=false`).
+
+⚠ **Behind a TLS-terminating proxy** the browser's `Origin` is `https://host`, while the proxy
+talks plain HTTP to the service. The CORS check compares the two, so the service must learn the
+outer scheme, host and port: it reads `X-Forwarded-Proto`, `X-Forwarded-Host` and
+`X-Forwarded-Port` — and only from a TCP peer listed in `editor.trusted-proxies`
+(`TrustedForwardedHeadersFilter`; `Forwarded`, `X-Forwarded-Prefix` and `X-Forwarded-Ssl` are
+never read, and `server.forward-headers-strategy` is pinned to `none`). Without that, every
+request carrying an `Origin` — the login, every save — answers **403 `Invalid CORS request`**,
+while GETs without one (health checks, curl) stay green.
+- **Two apps** (shape 2 below): the service's peer is the SPA's nginx, which forwards the outer
+  proxy's `X-Forwarded-Proto` / `-Host` / `-Port` (`docker/nginx.conf` in the web repo); list
+  nginx in `editor.trusted-proxies` (compose does: its network's subnet).
+- **Bundled** (shape 1): the TLS proxy is the peer — list **that proxy** in
+  `editor.trusted-proxies`, or the login stays refused.
+- **What the outer proxy must do**, because whatever it passes on is believed: **overwrite**
+  `X-Forwarded-Proto`, keep `Host` (or set `X-Forwarded-Host`), and **drop** a client's
+  `X-Forwarded-Host` / `X-Forwarded-Port`. Caddy's `reverse_proxy` and an nginx with
+  `proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Host $http_host;` do the first
+  two (`$http_host`, not `$host`, which drops a non-default port).
+  Listing the outer proxy in `editor.trusted-proxies` as well matters only for the
+  `X-Forwarded-For` hop walk of the per-client limits.
 
 ## The API
 

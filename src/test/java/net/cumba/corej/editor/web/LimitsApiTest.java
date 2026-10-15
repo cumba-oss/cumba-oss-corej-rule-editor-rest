@@ -49,6 +49,9 @@ class LimitsApiTest
 
     static final int MAX_BUFFER = 1000;
 
+    /** The proxies of {@link #aForgedForwardedClientNeverGetsAFreshLoginBucket}. */
+    static final String TRUSTED_PROXIES = "192.0.2.0/24";
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry aRegistry)
     {
@@ -60,6 +63,7 @@ class LimitsApiTest
         aRegistry.add("editor.limits.max-buffer-bytes", () -> String.valueOf(MAX_BUFFER));
         aRegistry.add("editor.limits.logins-per-minute", () -> "5");
         aRegistry.add("editor.limits.pre-login-session-timeout", () -> "PT2M");
+        aRegistry.add("editor.trusted-proxies[0]", () -> TRUSTED_PROXIES);
     }
 
     @Autowired
@@ -209,6 +213,56 @@ class LimitsApiTest
                         }))
                 .andReturn();
         assertEquals("FORGE_REFUSED", code(other), "another client is not limited");
+    }
+
+
+    /** A login from {@code aPeer} carrying the forwarding headers {@code aHeaders}. */
+    private MvcResult loginVia(MockHttpSession aSession, String aToken, String aPeer,
+            String... aHeaders)
+        throws Exception
+    {
+        var request = json(post("/api/session/login"), aSession, aToken,
+                "{\"login\":\"mw\",\"token\":\"wrong\"}").with(r ->
+                {
+                    r.setRemoteAddr(aPeer);
+                    return r;
+                });
+        for (int i = 0; i < aHeaders.length; i += 2)
+        {
+            request.header(aHeaders[i], aHeaders[i + 1]);
+        }
+        return mvc.perform(request).andReturn();
+    }
+
+
+    @Test
+    @SuppressWarnings("PMD.AvoidUsingHardCodedIP") // documentation ranges (RFC 5737)
+    void aForgedForwardedClientNeverGetsAFreshLoginBucket() throws Exception
+    {
+        // PLAN-rule-editor-forwarded-headers M1, end to end through the filter chain: behind a
+        // trusted proxy the client is the right-most untrusted X-Forwarded-For hop, whatever the
+        // client claims left of it or in Forwarded: for= — never a fresh bucket per request (as
+        // Spring's ForwardedHeaderFilter would hand out, by making the left-most claim the peer)
+        MockHttpSession s = new MockHttpSession();
+        String token = csrf(mvc, s);
+        for (int i = 0; i < 5; i++)
+        {
+            MvcResult refused = loginVia(s, token, "192.0.2.10", "X-Forwarded-For",
+                    "203.0.113." + (i + 1) + ", 198.51.100.7");
+            assertEquals("FORGE_REFUSED", code(refused), "X-Forwarded-For attempt " + i);
+        }
+        MvcResult limited = loginVia(s, token, "192.0.2.10", "X-Forwarded-For",
+                "203.0.113.99, 198.51.100.7");
+        assertEquals("RATE_LIMITED", code(limited), "a forged left-most hop is no new client");
+        for (int i = 0; i < 5; i++)
+        {
+            MvcResult refused = loginVia(s, token, "192.0.2.10", "Forwarded",
+                    "for=203.0.113." + (i + 1), "X-Forwarded-For", "198.51.100.8");
+            assertEquals("FORGE_REFUSED", code(refused), "Forwarded attempt " + i);
+        }
+        MvcResult forwarded = loginVia(s, token, "192.0.2.10", "Forwarded", "for=203.0.113.99",
+                "X-Forwarded-For", "198.51.100.8");
+        assertEquals("RATE_LIMITED", code(forwarded), "Forwarded: for= is never believed");
     }
 
 
