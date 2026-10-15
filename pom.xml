@@ -139,8 +139,6 @@
         <plugin.central-publishing-maven-plugin.version>0.12.0</plugin.central-publishing-maven-plugin.version>
         <central.skipPublishing>false</central.skipPublishing>
 
-        <dependency.plexus-compiler.version>2.17.1</dependency.plexus-compiler.version>
-
         <!-- Error Prone - consumed by the ErrPrn profile, active by default. -->
         <dependency.error-prone.version>2.50.0</dependency.error-prone.version>
 
@@ -280,78 +278,6 @@
     </properties>
 
     <profiles>
-
-        <!--                                                                  -->
-        <!-- Opt-in: extra Eclipse ECJ pass on top of the regular javac       -->
-        <!-- compile, run as a second compile bound to the verify phase.     -->
-        <!-- Activate with `-P ecj`.                                        -->
-        <!--                                                                  -->
-        <profile>
-            <id>ecj</id>
-            <activation>
-                <activeByDefault>false</activeByDefault>
-            </activation>
-            <build>
-                <pluginManagement>
-                    <plugins>
-                        <plugin>
-                            <groupId>org.apache.maven.plugins</groupId>
-                            <artifactId>maven-compiler-plugin</artifactId>
-                            <executions>
-                                <execution>
-                                    <id>ecj-check</id>
-                                    <phase>verify</phase>
-                                    <goals><goal>compile</goal></goals>
-                                    <configuration>
-                                        <compilerId>eclipse</compilerId>
-                                        <failOnWarning>true</failOnWarning>
-                                        <showWarnings>true</showWarnings>
-                                        <outputDirectory>${project.build.directory}/ecj-check-classes</outputDirectory>
-                                        <useIncrementalCompilation>false</useIncrementalCompilation>
-                                        <!--
-                                            Reset compilerArgs: ECJ rejects javac-specific flags
-                                            (-Xlint:all, -Xmaxwarns/errs) that the base build sets
-                                            for the default-compile execution. <failOnWarning> above
-                                            is the ECJ-side equivalent.
-
-                                            -warn:-warningToken silences ECJ's complaint about
-                                            @SuppressWarnings tokens it doesn't recognise (e.g.
-                                            javac's "this-escape", added in JDK 21 but unknown
-                                            to ECJ).
-                                        -->
-                                        <compilerArgs combine.self="override">
-                                            <arg>-warn:-warningToken</arg>
-                                        </compilerArgs>
-                                    </configuration>
-                                </execution>
-                            </executions>
-                            <dependencies>
-                                <dependency>
-                                    <groupId>org.codehaus.plexus</groupId>
-                                    <artifactId>plexus-compiler-eclipse</artifactId>
-                                    <version>${dependency.plexus-compiler.version}</version>
-                                </dependency>
-                                <!--
-                                    api + manager pinned to the eclipse compiler's version: maven-compiler-plugin
-                                    brings older ones, and ECJ then dies with NoSuchMethodError
-                                    (EclipseJavaCompiler.joinAnnotationProcessors).
-                                -->
-                                <dependency>
-                                    <groupId>org.codehaus.plexus</groupId>
-                                    <artifactId>plexus-compiler-api</artifactId>
-                                    <version>${dependency.plexus-compiler.version}</version>
-                                </dependency>
-                                <dependency>
-                                    <groupId>org.codehaus.plexus</groupId>
-                                    <artifactId>plexus-compiler-manager</artifactId>
-                                    <version>${dependency.plexus-compiler.version}</version>
-                                </dependency>
-                            </dependencies>
-                        </plugin>
-                    </plugins>
-                </pluginManagement>
-            </build>
-        </profile>
 
         <!--                                                                  -->
         <!-- PMD static analysis. Active by default (via property-based       -->
