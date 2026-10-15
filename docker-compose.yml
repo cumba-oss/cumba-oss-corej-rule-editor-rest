@@ -105,12 +105,15 @@ services:
       # The session cookie is Secure (see the HTTPS note above); false is a trial opt-out only.
       SERVER_SERVLET_SESSION_COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # Believe X-Forwarded-For (for the per-client limits: logins, anonymous runs and
-      # searches — security review M4) only from the compose network pinned below, where
+      # searches — security review M4) and X-Forwarded-Proto/-Host/-Port (the scheme, host
+      # and port the CORS check compares with the Origin behind a TLS proxy) only from the
+      # compose network pinned below, where
       # nginx lives — NEVER from every private range: a client in a trusted block cannot be
       # told from a proxy and would get a fresh limit key per request by forging the header.
       # ⚠ The network's gateway is in the block too: whatever reaches nginx from the host
       # (your TLS proxy — the port is bound to the loopback) is believed as well, so that
-      # proxy must append the real client to X-Forwarded-For. Keep this equal to the subnet.
+      # proxy must append the real client to X-Forwarded-For and drop a client's
+      # X-Forwarded-Host/-Port. Keep this equal to the subnet.
       EDITOR_TRUSTED_PROXIES: ${EDITOR_TRUSTED_PROXIES:-172.28.40.0/24}
     volumes:
       - workspaces:/var/lib/rule-editor/workspaces
