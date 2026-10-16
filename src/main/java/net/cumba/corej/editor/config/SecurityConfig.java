@@ -17,6 +17,7 @@ import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -134,6 +135,9 @@ public class SecurityConfig
         aHttp.csrf(c -> c.csrfTokenRepository(aCsrfTokens))
                 .cors(c -> c.configurationSource(corsConfigurationSource(aProperties)))
                 .securityContext(sc -> sc.securityContextRepository(aContexts))
+                // The TLS proxy owns HSTS (README, DOCKER.md): behind a trusted proxy the
+                // forwarded request is secure, and the default writer would add it here too.
+                .headers(h -> h.httpStrictTransportSecurity(HeadersConfigurer.HstsConfig::disable))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                         .sessionFixation().changeSessionId())
                 .formLogin(AbstractHttpConfigurer::disable)

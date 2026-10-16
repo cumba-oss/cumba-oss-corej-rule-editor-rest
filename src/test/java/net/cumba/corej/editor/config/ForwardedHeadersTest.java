@@ -3,6 +3,7 @@ package net.cumba.corej.editor.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -257,6 +258,24 @@ class ForwardedHeadersTest
         // review M2: unset, Boot turns the RemoteIpValve on by itself on a detected cloud
         // platform — a second, unconfigured trust path beside editor.trusted-proxies
         assertEquals("none", environment.getProperty("server.forward-headers-strategy"));
+    }
+
+
+    @Test
+    void behindATrustedTlsProxyTheEditorSendsNoHsts() throws Exception
+    {
+        // review L1: the forwarded request is secure now, and Spring Security's default header
+        // writer would add Strict-Transport-Security to it — the TLS proxy owns HSTS, not the app
+        MvcResult info = mvc
+                .perform(fromPeer(get("/api/info"), PROXY).header("Host", HOST)
+                        .header("Origin", "https://" + HOST).header("X-Forwarded-Proto", "https"))
+                .andReturn();
+        assertEquals(200, info.getResponse().getStatus(), info.getResponse().getContentAsString());
+        assertNull(info.getResponse().getHeader("Strict-Transport-Security"));
+        // a direct https request neither; the other default security headers stay
+        MvcResult direct = mvc.perform(get("/api/info").secure(true)).andReturn();
+        assertNull(direct.getResponse().getHeader("Strict-Transport-Security"));
+        assertEquals("nosniff", direct.getResponse().getHeader("X-Content-Type-Options"));
     }
 
 

@@ -141,7 +141,11 @@ while GETs without one (health checks, curl) stay green.
   `X-Forwarded-Proto`, keep `Host` (or set `X-Forwarded-Host`), and **drop** a client's
   `X-Forwarded-Host` / `X-Forwarded-Port`. Caddy's `reverse_proxy` and an nginx with
   `proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Host $http_host;` do the first
-  two (`$http_host`, not `$host`, which drops a non-default port).
+  two (`$http_host`, not `$host`, which drops a non-default port). Caddy passes a client's
+  `X-Forwarded-Port` through: add `header_up -X-Forwarded-Port` to its `reverse_proxy`.
+  A set `X-Forwarded-Host` must carry a non-default port (`host:8443`): once it is present the
+  port is no longer taken from `Host`, so a proxy on :8443 sending `X-Forwarded-Host $host`
+  gets **403 `Invalid CORS request`**.
   Listing the outer proxy in `editor.trusted-proxies` as well matters only for the
   `X-Forwarded-For` hop walk of the per-client limits.
 

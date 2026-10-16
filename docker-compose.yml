@@ -112,8 +112,8 @@ services:
       # told from a proxy and would get a fresh limit key per request by forging the header.
       # ⚠ The network's gateway is in the block too: whatever reaches nginx from the host
       # (your TLS proxy — the port is bound to the loopback) is believed as well, so that
-      # proxy must append the real client to X-Forwarded-For and drop a client's
-      # X-Forwarded-Host/-Port. Keep this equal to the subnet.
+      # proxy must append the real client to X-Forwarded-For, overwrite X-Forwarded-Proto
+      # and drop a client's X-Forwarded-Host/-Port. Keep this equal to the subnet.
       EDITOR_TRUSTED_PROXIES: ${EDITOR_TRUSTED_PROXIES:-172.28.40.0/24}
     volumes:
       - workspaces:/var/lib/rule-editor/workspaces
